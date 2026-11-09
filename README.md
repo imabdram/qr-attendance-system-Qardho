@@ -92,11 +92,25 @@ an account.
 
 ## Accounts
 
-- Admins sign in with their real email (e.g. `admin@attendance-login.example.com`).
+- Admins sign in with their real email or with a username (e.g. `admin@attendance-login.example.com`).
 - Employees sign in with a **username**; the app appends
   `@attendance-login.example.com` before calling Neon Auth.
-- New accounts are created from **Employees → Add Employee**. The first admin must
-  exist in the database already.
+- New accounts are created from **Employees → Add Employee**: pick *Account type*
+  (Employee or Administrator), and for an administrator enter the **email** they
+  will sign in with.
+- The account list shows both roles; use *Reset password* (key icon) to set a new
+  password for anyone, including another admin.
+- The first admin must exist in the database already.
+
+### Adding an admin from the command line
+
+```bash
+node scripts/add-admin.mjs dhomdesign@gmail.com 'SomeStrongPassword!' "Dhom Design"
+```
+
+Re-running the same command with the same email **changes that admin's password**.
+It signs in as an existing admin using `ADMIN_EMAIL` / `ADMIN_PASSWORD`
+(defaults to the bootstrap admin).
 
 ## Deployment (Vercel)
 

@@ -375,12 +375,16 @@ function Employees() {
     full_name: string;
     phone: string;
     username: string;
+    email: string;
+    role: 'employee' | 'admin';
     password: string;
     shift: 'morning' | 'afternoon';
   }>({
     full_name: '',
     phone: '',
     username: '',
+    email: '',
+    role: 'employee',
     password: '',
     shift: 'morning',
   });
@@ -399,11 +403,7 @@ function Employees() {
   const [deleteEmp, setDeleteEmp] = useState<Profile | null>(null);
 
   const load = async () => {
-    const { data } = await db
-      .from('profiles')
-      .select('*')
-      .eq('role', 'employee')
-      .order('full_name');
+    const { data } = await db.from('profiles').select('*').order('full_name');
     setList((data || []) as Profile[]);
   };
 
@@ -420,15 +420,19 @@ function Employees() {
         full_name: form.full_name,
         employee_number: form.phone,
         username: form.username,
+        email: form.email,
+        role: form.role,
         password: form.password,
         shift: form.shift,
       });
       setMsgType('success');
-      setMsg(data.message || 'Employee account created successfully.');
+      setMsg(data.message || 'Account created successfully.');
       setForm({
         full_name: '',
         phone: '',
         username: '',
+        email: '',
+        role: 'employee',
         password: '',
         shift: 'morning',
       });
@@ -566,6 +570,36 @@ function Employees() {
           </label>
 
           <label>
+            Account type
+            <select
+              value={form.role}
+              onChange={(e) => setForm({ ...form, role: e.target.value as 'employee' | 'admin' })}
+              style={{
+                border: '1px solid #dce5ee',
+                borderRadius: '8px',
+                padding: '11px 12px',
+                outline: 'none',
+                background: 'white',
+                color: '#2b1113',
+              }}
+            >
+              <option value="employee">Employee</option>
+              <option value="admin">Administrator</option>
+            </select>
+          </label>
+
+          <label>
+            Email {form.role === 'admin' ? '(used to sign in)' : '(optional)'}
+            <input
+              required={form.role === 'admin'}
+              type="email"
+              placeholder="e.g. name@gmail.com"
+              value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+            />
+          </label>
+
+          <label>
             Phone Number
             <input
               required
@@ -604,6 +638,11 @@ function Employees() {
               onChange={(e) => setForm({ ...form, password: e.target.value })}
             />
           </label>
+
+          <p className="muted tiny span-2" style={{ margin: 0 }}>
+            Employees sign in with their <strong>username</strong>. Administrators sign in with the
+            full <strong>email</strong> above.
+          </p>
 
           <div className="span-2" style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
             <button className="primary" disabled={busy}>
@@ -748,7 +787,7 @@ function Employees() {
       {/* Employee List Section */}
       <section className="panel">
         <div className="panel-head" style={{ flexWrap: 'wrap', gap: '12px' }}>
-          <h2>Employee Directory ({filtered.length})</h2>
+          <h2>Accounts ({filtered.length})</h2>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <div className="searchbox">
               <Search size={16} />
@@ -758,6 +797,23 @@ function Employees() {
                 onChange={(e) => setQ(e.target.value)}
               />
             </div>
+            <select
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value as any)}
+              style={{
+                border: '1px solid #f2dede',
+                borderRadius: '8px',
+                padding: '7px 10px',
+                fontSize: '12px',
+                background: '#fdf5f5',
+                color: '#5b3a3e',
+                fontWeight: 600,
+              }}
+            >
+              <option value="all">All Roles</option>
+              <option value="employee">Employees</option>
+              <option value="admin">Administrators</option>
+            </select>
             <select
               value={shiftFilter}
               onChange={(e) => setShiftFilter(e.target.value as any)}
@@ -801,6 +857,7 @@ function Employees() {
                 <th>Name</th>
                 <th>Phone Number</th>
                 <th>Username</th>
+                <th>Role</th>
                 <th>Shift</th>
                 <th>Status</th>
                 <th>Actions</th>
@@ -809,7 +866,7 @@ function Employees() {
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="empty">
+                  <td colSpan={7} className="empty">
                     No employees matching the filter criteria.
                   </td>
                 </tr>
@@ -824,6 +881,11 @@ function Employees() {
                       <td>{p.employee_number}</td>
                       <td>{p.username}</td>
                       <td>
+                        <span className={`role-badge ${p.role}`}>
+                          {p.role === 'admin' ? 'Administrator' : 'Employee'}
+                        </span>
+                      </td>
+                      <td>
                         <span className={`shift-badge ${shift}`}>
                           {shift === 'afternoon' ? 'Afternoon' : 'Morning'}
                         </span>
@@ -835,13 +897,15 @@ function Employees() {
                       </td>
                       <td>
                         <div className="actions-cell">
-                          <button
-                            className="small-btn"
-                            onClick={() => toggle(p)}
-                            title={p.is_active ? 'Deactivate Account' : 'Activate Account'}
-                          >
-                            {p.is_active ? 'Deactivate' : 'Activate'}
-                          </button>
+                          {p.role !== 'admin' && (
+                            <button
+                              className="small-btn"
+                              onClick={() => toggle(p)}
+                              title={p.is_active ? 'Deactivate Account' : 'Activate Account'}
+                            >
+                              {p.is_active ? 'Deactivate' : 'Activate'}
+                            </button>
+                          )}
                           <button
                             className="icon-action-btn"
                             title="Edit Profile & Shift"
@@ -866,13 +930,15 @@ function Employees() {
                           >
                             <KeyRound size={14} />
                           </button>
-                          <button
-                            className="icon-action-btn delete"
-                            title="Delete Account"
-                            onClick={() => setDeleteEmp(p)}
-                          >
-                            <Trash2 size={14} />
-                          </button>
+                          {p.role !== 'admin' && (
+                            <button
+                              className="icon-action-btn delete"
+                              title="Delete Account"
+                              onClick={() => setDeleteEmp(p)}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

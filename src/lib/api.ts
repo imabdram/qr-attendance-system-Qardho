@@ -47,6 +47,7 @@ export async function createEmployeeAccount(form: {
   employee_number: string;
   username: string;
   password: string;
+  email?: string;
   role?: 'admin' | 'employee';
   shift?: 'morning' | 'afternoon';
   department?: string;
@@ -61,6 +62,7 @@ export async function createEmployeeAccount(form: {
     p_role: form.role || 'employee',
     p_shift: form.shift || 'morning',
     p_department: form.department || null,
+    p_email: form.email?.trim() || null,
   });
 
   if (rpcError) {
