@@ -9,13 +9,39 @@ import { scryptAsync } from '@noble/hashes/scrypt.js';
  * - The Neon Data API is PostgREST-compatible, so the Supabase data client is used
  *   purely as a transport; every request carries the Neon Auth JWT via `accessToken`.
  */
-export const NEON_AUTH_URL =
-  (import.meta.env.VITE_NEON_AUTH_URL as string | undefined) ||
+const DEFAULT_AUTH_URL =
   'https://ep-icy-sound-za5lczjb.neonauth.c-2.eu-west-2.aws.neon.tech/neondb/auth';
-
-export const NEON_DATA_API_URL =
-  (import.meta.env.VITE_NEON_DATA_API_URL as string | undefined) ||
+const DEFAULT_DATA_API_URL =
   'https://ep-icy-sound-za5lczjb.apirest.c-2.eu-west-2.aws.neon.tech/neondb/rest/v1';
+
+/**
+ * Environment values are pasted by hand into Vercel, so treat a malformed value
+ * (truncated host, missing path) as absent instead of shipping a broken client.
+ */
+function sanitizeUrl(value: unknown, fallback: string): string {
+  if (typeof value !== 'string' || !value.startsWith('http')) return fallback;
+  try {
+    const url = new URL(value);
+    if (url.hostname.endsWith('.') || url.hostname.length < 4) return fallback;
+    if (url.pathname.replace(/\/$/, '') === '') return fallback;
+    return value.replace(/\/$/, '');
+  } catch {
+    return fallback;
+  }
+}
+
+const rawAuthUrl = import.meta.env.VITE_NEON_AUTH_URL as string | undefined;
+const rawDataApiUrl = import.meta.env.VITE_NEON_DATA_API_URL as string | undefined;
+
+export const NEON_AUTH_URL = sanitizeUrl(rawAuthUrl, DEFAULT_AUTH_URL);
+export const NEON_DATA_API_URL = sanitizeUrl(rawDataApiUrl, DEFAULT_DATA_API_URL);
+
+if (rawAuthUrl && rawAuthUrl !== NEON_AUTH_URL) {
+  console.warn('Ignoring malformed VITE_NEON_AUTH_URL, using the default Neon Auth endpoint.');
+}
+if (rawDataApiUrl && rawDataApiUrl !== NEON_DATA_API_URL) {
+  console.warn('Ignoring malformed VITE_NEON_DATA_API_URL, using the default Neon Data API endpoint.');
+}
 
 /** supabase-js appends `/rest/v1` itself, so strip it from the configured base. */
 const DATA_API_BASE = NEON_DATA_API_URL.replace(/\/rest\/v1\/?$/, '');
