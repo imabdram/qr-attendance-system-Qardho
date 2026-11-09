@@ -149,7 +149,7 @@ function Dashboard() {
               padding: '9px 12px',
               fontSize: '12px',
               background: '#fff',
-              color: '#4a2b2f',
+              color: '#374151',
               fontWeight: 700,
             }}
           >
@@ -580,7 +580,7 @@ function Employees() {
                 padding: '11px 12px',
                 outline: 'none',
                 background: 'white',
-                color: '#2b1113',
+                color: '#111827',
               }}
             >
               <option value="employee">Employee</option>
@@ -620,7 +620,7 @@ function Employees() {
                 padding: '11px 12px',
                 outline: 'none',
                 background: 'white',
-                color: '#2b1113',
+                color: '#111827',
               }}
             >
               <option value="morning">Morning Shift (Late after 09:00)</option>
@@ -646,7 +646,11 @@ function Employees() {
 
           <div className="span-2" style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
             <button className="primary" disabled={busy}>
-              {busy ? 'Creating…' : 'Create Employee Account'}
+              {busy
+                ? 'Creating…'
+                : form.role === 'admin'
+                ? 'Create Administrator'
+                : 'Create Employee Account'}
             </button>
             <button type="button" className="secondary" onClick={() => setShow(false)}>
               Cancel
@@ -801,12 +805,12 @@ function Employees() {
               value={roleFilter}
               onChange={(e) => setRoleFilter(e.target.value as any)}
               style={{
-                border: '1px solid #f2dede',
+                border: '1px solid #e5e7eb',
                 borderRadius: '8px',
                 padding: '7px 10px',
                 fontSize: '12px',
-                background: '#fdf5f5',
-                color: '#5b3a3e',
+                background: '#ffffff',
+                color: '#374151',
                 fontWeight: 600,
               }}
             >
@@ -818,12 +822,12 @@ function Employees() {
               value={shiftFilter}
               onChange={(e) => setShiftFilter(e.target.value as any)}
               style={{
-                border: '1px solid #f2dede',
+                border: '1px solid #e5e7eb',
                 borderRadius: '8px',
                 padding: '7px 10px',
                 fontSize: '12px',
-                background: '#fdf5f5',
-                color: '#5b3a3e',
+                background: '#ffffff',
+                color: '#374151',
                 fontWeight: 600,
               }}
             >
@@ -835,12 +839,12 @@ function Employees() {
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as any)}
               style={{
-                border: '1px solid #f2dede',
+                border: '1px solid #e5e7eb',
                 borderRadius: '8px',
                 padding: '7px 10px',
                 fontSize: '12px',
-                background: '#fdf5f5',
-                color: '#5b3a3e',
+                background: '#ffffff',
+                color: '#374151',
                 fontWeight: 600,
               }}
             >
@@ -1155,7 +1159,7 @@ function QrDisplay() {
         <div
           className="live-label"
           style={{
-            background: mode === 'fixed' ? '#fdecec' : mode === 'manual' ? '#fff4df' : '#fdecec',
+            background: mode === 'fixed' ? '#fef2f2' : mode === 'manual' ? '#fff4df' : '#fef2f2',
             color: mode === 'fixed' ? '#b91c1c' : mode === 'manual' ? '#b7791f' : '#b91c1c',
           }}
         >
@@ -1205,7 +1209,7 @@ function QrDisplay() {
             </div>
           </>
         ) : (
-          <p style={{ margin: '30px 0', color: err ? '#c34b4b' : '#7a5459', lineHeight: '1.5' }}>
+          <p style={{ margin: '30px 0', color: err ? '#c34b4b' : '#6b7280', lineHeight: '1.5' }}>
             {loading ? 'Generating secure QR…' : err}
           </p>
         )}
@@ -1314,7 +1318,7 @@ function Reports() {
                 padding: '11px 12px',
                 outline: 'none',
                 background: 'white',
-                color: '#2b1113',
+                color: '#111827',
               }}
             >
               <option value="all">All Shifts</option>
