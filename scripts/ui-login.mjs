@@ -48,6 +48,7 @@ const ws = new WebSocket(target.webSocketDebuggerUrl);
 let id = 0;
 const pending = new Map();
 const errors = [];
+const pendingRequests = new Map();
 ws.addEventListener('message', (ev) => {
   const msg = JSON.parse(ev.data);
   if (msg.id && pending.has(msg.id)) {
@@ -56,6 +57,11 @@ ws.addEventListener('message', (ev) => {
     msg.error ? reject(new Error(JSON.stringify(msg.error))) : resolve(msg.result);
   } else if (msg.method === 'Runtime.exceptionThrown') {
     errors.push(msg.params.exceptionDetails.exception?.description || msg.params.exceptionDetails.text);
+  } else if (msg.method === 'Network.requestWillBeSent') {
+    pendingRequests.set(msg.params.requestId, msg.params.request.url);
+  } else if (msg.method === 'Network.loadingFailed') {
+    const url = pendingRequests.get(msg.params.requestId) || '?';
+    errors.push(`FAILED ${msg.params.errorText} ${url}`);
   } else if (msg.method === 'Network.responseReceived' && msg.params.response.status >= 400) {
     errors.push(`HTTP ${msg.params.response.status} ${msg.params.response.url}`);
   }

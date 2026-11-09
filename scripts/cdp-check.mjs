@@ -105,5 +105,15 @@ for (const e of events) {
 
 console.log('--- page text ---');
 console.log(text.result.value);
+
+if (process.env.EVAL) {
+  const out = await send('Runtime.evaluate', {
+    expression: process.env.EVAL,
+    returnByValue: true,
+    awaitPromise: true,
+  });
+  console.log('--- eval ---');
+  console.log(JSON.stringify(out.result?.value ?? out.result, null, 2));
+}
 ws.close();
 chrome.kill();
