@@ -86,18 +86,38 @@ await send('Runtime.enable');
 await send('Page.enable');
 await send('Page.navigate', { url: 'http://localhost:5173/login' });
 await sleep(2500);
-await typeInto(`document.querySelector('input[autocomplete="username"]')`, 'admin');
-await typeInto(`document.querySelector('input[autocomplete="current-password"]')`, 'AdminPassword123!');
+
+// Wait until React has attached to the inputs, otherwise typing is lost on submit.
+for (let i = 0; i < 40; i++) {
+  const ready = await evaluate(
+    `(() => { const el = document.querySelector('form input'); return !!(el && Object.keys(el).some(k => k.startsWith('__reactProps'))); })()`
+  );
+  if (ready) break;
+  await sleep(250);
+}
+await sleep(400);
+
+await typeInto(`document.querySelector('input[autocomplete="username"]')`, process.env.ADMIN_EMAIL || 'admin');
+await typeInto(`document.querySelector('input[autocomplete="current-password"]')`, process.env.ADMIN_PASSWORD || 'AdminPassword123!');
 await evaluate(`document.querySelector('form button.primary').click()`);
 await sleep(5000);
 
-await send('Page.navigate', { url: 'http://localhost:5173/admin/employees' });
+await send('Page.navigate', { url: (process.env.BASE_URL || 'http://localhost:5173') + '/admin/employees' });
 await sleep(3000);
 
 await evaluate(
   `[...document.querySelectorAll('button')].find(b => b.textContent.includes('Add Employee')).click()`
 );
 await sleep(1200);
+
+if (process.env.FORM_ONLY) {
+  const png0 = await send('Page.captureScreenshot', { format: 'png' });
+  writeFileSync('.tmp/admin-form.png', Buffer.from(png0.data, 'base64'));
+  console.log(await evaluate('document.body.innerText'));
+  ws.close();
+  chrome.kill();
+  process.exit(0);
+}
 
 await typeInto(`document.querySelector('input[placeholder="e.g. Ahmed Ali"]')`, emp.fullName);
 await typeInto(`document.querySelector('input[placeholder="e.g. ahmed01"]')`, emp.username);

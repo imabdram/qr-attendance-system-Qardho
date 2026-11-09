@@ -98,8 +98,8 @@ const typeInto = async (sel, text) => {
   await send('Input.insertText', { text });
   await sleep(150);
 };
-await typeInto('input[autocomplete="username"]', 'admin');
-await typeInto('input[autocomplete="current-password"]', 'AdminPassword123!');
+await typeInto('input[autocomplete="username"]', process.env.ADMIN_EMAIL || 'admin');
+await typeInto('input[autocomplete="current-password"]', process.env.ADMIN_PASSWORD || 'AdminPassword123!');
 await sleep(600);
 
 console.log('clicking sign in…');

@@ -84,7 +84,17 @@ await send('Runtime.enable');
 await send('Network.enable');
 await send('Page.enable');
 await send('Page.navigate', { url: BASE + '/login' });
-await sleep(2500);
+await sleep(2000);
+
+// Wait until React has attached to the inputs, otherwise the click submits nothing.
+for (let i = 0; i < 40; i++) {
+  const ready = await evaluate(
+    `(() => { const el = document.querySelector('form input'); return !!(el && Object.keys(el).some(k => k.startsWith('__reactProps'))); })()`
+  );
+  if (ready) break;
+  await sleep(250);
+}
+await sleep(400);
 
 await evaluate(`document.querySelector('input[autocomplete="username"]').focus()`);
 await send('Input.insertText', { text: identifier });
