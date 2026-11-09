@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { recordAttendance } from '../lib/api';
-import { supabase } from '../lib/supabase';
+import { db } from '../lib/neon';
 import type { Profile, Attendance } from '../lib/types';
 import { timeLocal, todayLocal, dateLabel } from '../lib/date';
 import {
@@ -33,13 +33,13 @@ export default function Employee({ profile }: { profile: Profile }) {
     setLoadingHistory(true);
     try {
       const [{ data: todayData }, { data: historyData }] = await Promise.all([
-        supabase
+        db
           .from('attendance')
           .select('*')
           .eq('employee_id', profile.id)
           .eq('work_date', todayLocal())
           .maybeSingle(),
-        supabase
+        db
           .from('attendance')
           .select('*')
           .eq('employee_id', profile.id)
@@ -119,7 +119,7 @@ export default function Employee({ profile }: { profile: Profile }) {
     <main className="page employee-page">
       <div className="welcome-row">
         <div>
-          <p className="eyebrow">EMPLOYEE PORTAL</p>
+          <p className="eyebrow">QARDHO BRANCH · EMPLOYEE PORTAL</p>
           <h1>Hello, {profile.full_name.split(' ')[0]}</h1>
           <p className="muted" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '4px' }}>
             <span>@{profile.username} · {profile.employee_number}</span>
@@ -279,8 +279,8 @@ export default function Employee({ profile }: { profile: Profile }) {
                                 style={{
                                   marginLeft: '8px',
                                   fontSize: '10px',
-                                  background: '#e0f2fe',
-                                  color: '#0369a1',
+                                  background: '#fee2e2',
+                                  color: '#b91c1c',
                                   padding: '2px 6px',
                                   borderRadius: '10px',
                                   fontWeight: 700,

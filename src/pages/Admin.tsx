@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { Routes, Route, Link } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
+import { db } from '../lib/neon';
 import {
   generateQrToken,
   createEmployeeAccount,
@@ -48,7 +48,7 @@ function Dashboard() {
     if (!thresholdInput || !editingThreshold) return;
     setSavingThreshold(true);
     const key = editingThreshold === 'morning' ? 'late_after_morning' : 'late_after_afternoon';
-    const { error } = await supabase
+    const { error } = await db
       .from('app_settings')
       .upsert({
         setting_key: key,
@@ -69,11 +69,11 @@ function Dashboard() {
     setSavingThreshold(false);
   };
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       // Query profiles without explicit shift column in the joined select to prevent PostgREST column missing crashes
-      const { data: a, error: aErr } = await supabase
+      const { data: a, error: aErr } = await db
         .from('attendance')
         .select('*, profiles!attendance_employee_id_fkey(full_name,employee_number,department)')
         .eq('work_date', todayLocal())
@@ -85,14 +85,14 @@ function Dashboard() {
         setRows((a || []) as any);
       }
 
-      const { data: p } = await supabase
+      const { data: p } = await db
         .from('profiles')
         .select('*')
         .eq('role', 'employee')
         .eq('is_active', true);
       setStaff((p || []) as Profile[]);
 
-      const { data: s } = await supabase
+      const { data: s } = await db
         .from('app_settings')
         .select('setting_key,setting_value');
       if (s) {
@@ -112,13 +112,9 @@ function Dashboard() {
 
   useEffect(() => {
     load();
-    const ch = supabase
-      .channel('attendance-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, load)
-      .subscribe();
-    return () => {
-      supabase.removeChannel(ch);
-    };
+    // Neon's Data API has no Realtime channel: poll today's attendance every 10s.
+    const interval = setInterval(() => load(true), 10000);
+    return () => clearInterval(interval);
   }, []);
 
   const filteredStaff = shiftFilter === 'all'
@@ -153,7 +149,7 @@ function Dashboard() {
               padding: '9px 12px',
               fontSize: '12px',
               background: '#fff',
-              color: '#334e68',
+              color: '#4a2b2f',
               fontWeight: 700,
             }}
           >
@@ -161,7 +157,7 @@ function Dashboard() {
             <option value="morning">Morning Shift</option>
             <option value="afternoon">Afternoon Shift</option>
           </select>
-          <button className="secondary" onClick={load}>
+          <button className="secondary" onClick={() => load()}>
             <RefreshCw size={16} /> Refresh
           </button>
         </div>
@@ -189,7 +185,7 @@ function Dashboard() {
               {/* Morning Threshold */}
               {editingThreshold === 'morning' ? (
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                  <span className="tiny" style={{ fontWeight: 700, color: '#1d4ed8' }}>Morning late:</span>
+                  <span className="tiny" style={{ fontWeight: 700, color: '#b91c1c' }}>Morning late:</span>
                   <input
                     type="time"
                     value={thresholdInput}
@@ -214,12 +210,12 @@ function Dashboard() {
                     style={{ padding: '2px 8px' }}
                     onClick={() => setEditingThreshold(null)}
                   >
-                    ✕
+                    âœ•
                   </button>
                 </div>
               ) : (
                 <span className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                  <span>Morning late: <strong style={{ color: '#1d4ed8' }}>{morningLateAt}</strong></span>
+                  <span>Morning late: <strong style={{ color: '#b91c1c' }}>{morningLateAt}</strong></span>
                   <button
                     className="small-btn"
                     style={{ padding: '2px 7px', fontSize: '11px', cursor: 'pointer' }}
@@ -261,7 +257,7 @@ function Dashboard() {
                     style={{ padding: '2px 8px' }}
                     onClick={() => setEditingThreshold(null)}
                   >
-                    ✕
+                    âœ•
                   </button>
                 </div>
               ) : (
@@ -403,7 +399,7 @@ function Employees() {
   const [deleteEmp, setDeleteEmp] = useState<Profile | null>(null);
 
   const load = async () => {
-    const { data } = await supabase
+    const { data } = await db
       .from('profiles')
       .select('*')
       .eq('role', 'employee')
@@ -507,7 +503,7 @@ function Employees() {
   };
 
   const toggle = async (p: Profile) => {
-    const { error } = await supabase
+    const { error } = await db
       .from('profiles')
       .update({ is_active: !p.is_active })
       .eq('id', p.id);
@@ -590,7 +586,7 @@ function Employees() {
                 padding: '11px 12px',
                 outline: 'none',
                 background: 'white',
-                color: '#193651',
+                color: '#2b1113',
               }}
             >
               <option value="morning">Morning Shift (Late after 09:00)</option>
@@ -665,8 +661,8 @@ function Employees() {
                   value={editForm.shift}
                   onChange={(e) => setEditForm({ ...editForm, shift: e.target.value as any })}
                 >
-                  <option value="morning">☀️ Morning Shift (Late after 09:00 AM)</option>
-                  <option value="afternoon">🌙 Afternoon Shift (Late after 04:30 PM)</option>
+                  <option value="morning">â˜€ï¸ Morning Shift (Late after 09:00 AM)</option>
+                  <option value="afternoon">ðŸŒ™ Afternoon Shift (Late after 04:30 PM)</option>
                 </select>
               </div>
 
@@ -766,12 +762,12 @@ function Employees() {
               value={shiftFilter}
               onChange={(e) => setShiftFilter(e.target.value as any)}
               style={{
-                border: '1px solid #e5ebf1',
+                border: '1px solid #f2dede',
                 borderRadius: '8px',
                 padding: '7px 10px',
                 fontSize: '12px',
-                background: '#f5f8fb',
-                color: '#476078',
+                background: '#fdf5f5',
+                color: '#5b3a3e',
                 fontWeight: 600,
               }}
             >
@@ -783,12 +779,12 @@ function Employees() {
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as any)}
               style={{
-                border: '1px solid #e5ebf1',
+                border: '1px solid #f2dede',
                 borderRadius: '8px',
                 padding: '7px 10px',
                 fontSize: '12px',
-                background: '#f5f8fb',
-                color: '#476078',
+                background: '#fdf5f5',
+                color: '#5b3a3e',
                 fontWeight: 600,
               }}
             >
@@ -986,8 +982,8 @@ function QrDisplay() {
     <div className="qr-page">
       <div className="page-head">
         <div>
-          <p className="eyebrow">OFFICE CHECK-IN</p>
-          <h1>Office QR Display</h1>
+          <p className="eyebrow">QARDHO OFFICE CHECK-IN</p>
+          <h1>Qardho QR Display</h1>
           <p className="muted">Configure rotation behavior and display or print your QR code.</p>
         </div>
         <button className="secondary" onClick={refresh} disabled={loading}>
@@ -1085,22 +1081,22 @@ function QrDisplay() {
       </div>
 
       {/* Printable Heading for printouts */}
-      <h1 className="print-only-title">Office Attendance Check-In</h1>
-      <p className="print-only-sub">Scan this QR code with your phone camera to record Time In.</p>
+      <h1 className="print-only-title">Qardho Office Attendance Check-In</h1>
+      <p className="print-only-sub">Qardho Branch · Scan this QR code with your phone camera to record Time In.</p>
 
       {/* Main QR Display Card */}
       <section className="qr-display-card">
         <div
           className="live-label"
           style={{
-            background: mode === 'fixed' ? '#eaf3fb' : mode === 'manual' ? '#fff4df' : '#e8f8ef',
-            color: mode === 'fixed' ? '#176aa8' : mode === 'manual' ? '#b7791f' : '#18784a',
+            background: mode === 'fixed' ? '#fdecec' : mode === 'manual' ? '#fff4df' : '#fdecec',
+            color: mode === 'fixed' ? '#b91c1c' : mode === 'manual' ? '#b7791f' : '#b91c1c',
           }}
         >
           <span
-            className="live-dot"
+            className={'live-dot' + (mode === 'auto' ? ' pulsing' : '')}
             style={{
-              background: mode === 'fixed' ? '#176aa8' : mode === 'manual' ? '#b7791f' : '#20a35b',
+              background: mode === 'fixed' ? '#b91c1c' : mode === 'manual' ? '#b7791f' : '#dc2626',
             }}
           />{' '}
           {mode === 'fixed'
@@ -1143,7 +1139,7 @@ function QrDisplay() {
             </div>
           </>
         ) : (
-          <p style={{ margin: '30px 0', color: err ? '#c34b4b' : '#62768b', lineHeight: '1.5' }}>
+          <p style={{ margin: '30px 0', color: err ? '#c34b4b' : '#7a5459', lineHeight: '1.5' }}>
             {loading ? 'Generating secure QR…' : err}
           </p>
         )}
@@ -1165,7 +1161,7 @@ function Reports() {
 
   const load = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('attendance')
       .select('*, profiles!attendance_employee_id_fkey(full_name,employee_number,department)')
       .gte('work_date', from)
@@ -1252,7 +1248,7 @@ function Reports() {
                 padding: '11px 12px',
                 outline: 'none',
                 background: 'white',
-                color: '#193651',
+                color: '#2b1113',
               }}
             >
               <option value="all">All Shifts</option>

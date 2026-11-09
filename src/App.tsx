@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Routes, Route, Navigate, Link, useNavigate } from 'react-router-dom';
-import { supabase, isSupabaseConfigured } from './lib/supabase';
+import {
+  db,
+  isBackendConfigured,
+  onAuthChange,
+  restoreSession,
+  signOut as endSession,
+} from './lib/neon';
 import type { Profile } from './lib/types';
 import Login from './pages/Login';
 import Admin from './pages/Admin';
@@ -15,86 +21,73 @@ export default function App() {
   useEffect(() => {
     let alive = true;
 
-    if (!isSupabaseConfigured) {
+    if (!isBackendConfigured) {
       setLoading(false);
       return;
     }
 
-    const load = async () => {
+    const loadProfile = async (user: { id: string } | null) => {
+      if (!user) {
+        if (alive) setProfile(null);
+        return;
+      }
       try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        if (session) {
-          const { data } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', session.user.id)
-            .maybeSingle();
-          if (alive) setProfile(data as Profile | null);
-        }
+        const { data } = await db
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .maybeSingle();
+        if (alive) setProfile(data as Profile | null);
       } catch (e) {
-        console.error('Session load error:', e);
-      } finally {
-        if (alive) setLoading(false);
+        console.error('Profile load error:', e);
       }
     };
 
-    load();
+    restoreSession()
+      .then((user) => loadProfile(user))
+      .catch((e) => console.error('Session load error:', e))
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_e, session) => {
-      try {
-        if (!session) {
-          setProfile(null);
-          return;
-        }
-        const { data } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .maybeSingle();
-        setProfile(data as Profile | null);
-      } catch (e) {
-        console.error('Auth state change error:', e);
-      }
+    const unsubscribe = onAuthChange((user) => {
+      if (alive) loadProfile(user);
     });
 
     return () => {
       alive = false;
-      subscription.unsubscribe();
+      unsubscribe();
     };
   }, []);
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    await endSession();
     setProfile(null);
     nav('/login');
   };
 
-  if (!isSupabaseConfigured) {
+  if (!isBackendConfigured) {
     return (
       <main className="login-wrap">
         <div className="login-card" style={{ maxWidth: '540px' }}>
-          <div className="login-logo" style={{ background: '#fff4df', color: '#b7791f' }}>
+          <div className="login-logo" style={{ background: '#fff1f1', color: '#b91c1c' }}>
             <AlertCircle size={30} />
           </div>
-          <p className="eyebrow" style={{ color: '#b7791f' }}>SETUP REQUIRED</p>
-          <h1>Connect to Supabase</h1>
+          <p className="eyebrow" style={{ color: '#b91c1c' }}>SETUP REQUIRED</p>
+          <h1>Connect to Neon</h1>
           <p className="muted">
-            The app needs your Supabase project credentials to authenticate users and record attendance.
+            The app needs your Neon Auth URL and Data API URL to sign users in and record attendance.
           </p>
-          <div className="alert" style={{ background: '#f5f8fb', color: '#1f3853', fontSize: '12px', lineHeight: '1.6' }}>
-            <strong>Step 1:</strong> Create or open your project at <code>https://supabase.com</code><br />
-            <strong>Step 2:</strong> Copy your project URL & Anon Key from <strong>Settings &rarr; API</strong><br />
+          <div className="alert" style={{ background: '#fdf6f6', color: '#3f1d22', fontSize: '12px', lineHeight: '1.6' }}>
+            <strong>Step 1:</strong> Open your Neon project &rarr; <strong>Auth</strong> / <strong>Data API</strong><br />
+            <strong>Step 2:</strong> Copy both endpoint URLs<br />
             <strong>Step 3:</strong> Put them in a <code>.env.local</code> file in this project:
-            <pre style={{ margin: '8px 0 0', padding: '10px', background: '#102a43', color: '#d9e6f2', borderRadius: '8px', overflowX: 'auto', fontSize: '11px' }}>
-              VITE_SUPABASE_URL=https://your-project.supabase.co&#10;VITE_SUPABASE_ANON_KEY=your-anon-key
+            <pre style={{ margin: '8px 0 0', padding: '10px', background: '#160709', color: '#f5d9d9', borderRadius: '8px', overflowX: 'auto', fontSize: '11px' }}>
+              VITE_NEON_AUTH_URL=https://…/neondb/auth&#10;VITE_NEON_DATA_API_URL=https://…/neondb/rest/v1
             </pre>
           </div>
           <p className="tiny muted">
-            Once saved, restart the Vite dev server to load the new credentials.
+            Once saved, restart the Vite dev server to load the new configuration.
           </p>
         </div>
       </main>
@@ -113,7 +106,8 @@ export default function App() {
             <span className="brand-icon">
               <QrCode size={21} />
             </span>{' '}
-            Attendance Portal
+            Qardho Attendance Portal
+            <span className="branch-pill">📍 Qardho Branch</span>
           </Link>
           <div className="top-actions">
             <span className="user-chip">

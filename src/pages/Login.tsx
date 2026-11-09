@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
+import { db, signIn, signOut } from '../lib/neon';
 import { QrCode, LockKeyhole } from 'lucide-react';
 
 export default function Login() {
@@ -19,34 +19,32 @@ export default function Login() {
       ? loginValue
       : `${loginValue}@attendance-login.example.com`;
 
-    const { data, error: authErr } = await supabase.auth.signInWithPassword({
-      email: loginEmail,
-      password,
-    });
+    const { user, error: authErr } = await signIn(loginEmail, password);
 
-    if (authErr || !data.user) {
+    if (authErr || !user) {
       setError('Incorrect username/email or password.');
       setBusy(false);
       return;
     }
 
-    const { data: p, error: pErr } = await supabase
+    const { data: p, error: pErr } = await db
       .from('profiles')
       .select('role, is_active')
-      .eq('id', data.user.id)
+      .eq('id', user.id)
       .maybeSingle();
 
     if (pErr || !p) {
       setError(
         'User authenticated, but no profile was found in the database. Please ensure your admin profile row exists in public.profiles table.'
       );
+      await signOut();
       setBusy(false);
       return;
     }
 
     if (!p.is_active) {
       setError('This account has been deactivated. Please contact an administrator.');
-      await supabase.auth.signOut();
+      await signOut();
       setBusy(false);
       return;
     }
@@ -61,7 +59,7 @@ export default function Login() {
         <div className="login-logo">
           <QrCode size={30} />
         </div>
-        <p className="eyebrow">EMPLOYEE MANAGEMENT</p>
+        <p className="eyebrow">QARDHO BRANCH · EMPLOYEE MANAGEMENT</p>
         <h1>Welcome back</h1>
         <p className="muted">Sign in to record or manage attendance.</p>
         <label>

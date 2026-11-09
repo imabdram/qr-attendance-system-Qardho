@@ -39,3 +39,10 @@ skills-lock.json
 # Supabase CLI
 supabase/.temp/
 supabase/.branches/
+
+# Aider cache
+.aider*
+.neon
+
+# Local build / browser-test scratch
+.tmp/

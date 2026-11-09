@@ -1,110 +1,127 @@
-# QR Attendance System
+# Qardho Attendance Portal
 
-A responsive Progressive Web App for employee **Time In only** using a rotating office QR code. Admins manage employee accounts, display the QR, monitor today's attendance and export date-filtered Excel workbooks (.xlsx).
+QR-based employee **Time In** for the Qardho branch. A rotating office QR code is
+shown on the admin dashboard; employees scan it from their phones to record
+attendance. Admins manage accounts, monitor today's arrivals, and export
+date-filtered Excel reports.
 
-## Technology
-- React + TypeScript + Vite
-- Supabase Auth + PostgreSQL + Row Level Security
-- Supabase Edge Functions (server-side QR validation and attendance writes)
-- `html5-qrcode` camera scanner and `qrcode.react` QR display
-- Vite PWA plugin
-- Default timezone: `Africa/Mogadishu`
+## Stack
 
-## Important assumptions in this starter
-- One office / one attendance location.
-- One Time In record per employee per Mogadishu calendar day.
-- Friday is treated as the weekly day off (no check-in is accepted and absent count is zero). Default late threshold is 08:00 Mogadishu time. Change `app_settings.late_after` to your office start time.
-- Admin creates employee accounts. Employees sign in with a username and password. The backend creates an internal non-delivery Auth email (`username@attendance-login.example.com`) so employees do not need personal email addresses. Admin signs in using the real email of the initial Auth account.
-- QR token is refreshed on the admin display every 25 seconds and expires after 45 seconds.
-- A valid token can be used by multiple employees during its short lifetime. A unique database constraint prevents duplicate daily check-ins.
+- React 19 + TypeScript + Vite (PWA)
+- **Neon Lakebase Postgres** (project `qr-attendance-system-Qardho`, branch `production`)
+- **Neon Auth** (Managed Better Auth) for sign-in, sessions, and JWT issuance
+- **Neon Data API** (PostgREST-compatible) for tables and stored functions, guarded by RLS
+- Supabase JS used **only** as the PostgREST transport for the Data API
+- `html5-qrcode` scanner, `qrcode.react` display, `xlsx` export
 
-## 1. Create Supabase project
-1. Create a project at https://supabase.com.
-2. Open **SQL Editor** and run `supabase/migrations/001_initial_schema.sql`.
-3. In **Authentication → Users**, create your first administrator with an email and password.
-4. Copy that user's UUID and run the following SQL, replacing the values:
+## Architecture
 
-```sql
-insert into public.profiles (id, full_name, employee_number, username, role, is_active)
-values ('ADMIN-AUTH-USER-UUID', 'System Administrator', 'ADMIN-001', 'admin@yourcompany.com', 'admin', true);
+```
+Browser (React SPA)
+   │  sign-in / session cookie
+   ├──────────────► Neon Auth  /neondb/auth
+   │                   └─ issues short-lived JWT (GET /token)
+   │  Bearer <JWT>
+   └──────────────► Neon Data API  /neondb/rest/v1
+                       ├─ tables (profiles, attendance, qr_tokens, app_settings)
+                       └─ RPCs (create_qr_token, scan_attendance, admin_*)
 ```
 
-The UUID must be the ID of the Auth user you just created. Set the admin profile username to a unique value. The admin can sign in using the actual email address used to create the initial Auth account.
+Row Level Security still applies: `auth.uid()` comes from the JWT, and every
+admin RPC re-checks `public.is_admin()`.
 
-## 2. Configure and deploy Edge Functions
-Install the Supabase CLI and log in:
+## Environment
 
-```bash
-npm install
-npx supabase login
-npx supabase link --project-ref YOUR_PROJECT_REF
-```
-
-Set the required secrets (use the values from Supabase Project Settings → API):
-
-```bash
-npx supabase secrets set SUPABASE_URL=https://YOUR_PROJECT.supabase.co
-npx supabase secrets set SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
-npx supabase secrets set SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY
-```
-
-Deploy all three functions:
-
-```bash
-npx supabase functions deploy create-qr-token
-npx supabase functions deploy scan-attendance
-npx supabase functions deploy admin-create-employee
-```
-
-Never put the service-role key in the frontend or in a `VITE_` variable. It belongs only in Supabase Edge Function secrets.
-
-## 3. Configure the frontend
-Copy `.env.example` to `.env.local` and fill in the Supabase project URL and **anon/public** key:
+Copy `.env.example` to `.env.local`:
 
 ```env
-VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
-VITE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
+VITE_NEON_AUTH_URL=https://<endpoint>.neonauth.c-2.eu-west-2.aws.neon.tech/neondb/auth
+VITE_NEON_DATA_API_URL=https://<endpoint>.apirest.c-2.eu-west-2.aws.neon.tech/neondb/rest/v1
 ```
 
-Then run:
+Server-side only (migrations/scripts, never bundled):
+
+```env
+DATABASE_URL=postgresql://…            # pooled
+DATABASE_URL_UNPOOLED=postgresql://…   # direct, used by scripts
+```
+
+Both `VITE_` values have production defaults baked into `src/lib/neon.ts`, so a
+Vercel build works even if the variables are not set — but setting them per
+environment is recommended.
+
+## Local development
 
 ```bash
 npm install
-npm run dev
+npm run dev      # http://localhost:5173
+npm run build    # tsc -b && vite build
+npm run preview
 ```
 
-For production:
+## Database
+
+Schema objects live in `db/migrations/` (the historical `supabase/migrations`
+files document the original schema and are no longer applied).
 
 ```bash
-npm run build
+node scripts/apply-sql.mjs db/migrations/001_neon_auth_scrypt_rpcs.sql
+neon data-api refresh-schema      # after adding/removing functions
 ```
 
-Deploy the generated `dist/` directory to Vercel or another static host. Set the two `VITE_` environment variables in the hosting dashboard. Configure SPA rewrites so all app routes serve `index.html`.
+### Stored functions
 
-## 4. First use
-1. Sign in with the administrator account.
-2. Open **Employees → Add employee**. Enter full name, employee ID, username and a temporary password (minimum 8 characters). Usernames may contain letters, numbers, dots, underscores and hyphens.
-3. Give the employee their login email and temporary password securely.
-4. Open **QR Display** on a screen at the office entrance. Keep the display awake and brightness high.
-5. Employee opens the website on their phone, signs in and scans the current QR.
-6. The dashboard updates when the attendance row is inserted. Reports can be filtered and exported.
+| Function | Purpose |
+| --- | --- |
+| `create_qr_token(p_duration_seconds)` | Issues a rotating QR token, stores only its SHA-256 hash |
+| `scan_attendance(p_token)` | Validates the token and writes a Time In row (Mogadishu date, shift-aware late detection) |
+| `admin_create_user(...)` | Creates `neon_auth.user` + credential account + `public.profiles` row |
+| `admin_update_employee(...)` | Updates name / phone / department / shift |
+| `admin_reset_password(...)` | Replaces the credential hash and drops existing sessions |
+| `admin_delete_employee(...)` | Deletes attendance, profile, account, sessions, and the auth user |
+| `is_admin()` | RLS helper backed by the JWT |
 
-Camera scanning requires HTTPS (or localhost during development). On iPhone, use Safari's **Add to Home Screen**; on Android, use the browser's **Install app** option when offered.
+### Passwords
 
-## 5. Configure work start / late time
-Default threshold is 08:00. Example to change to 07:30:
+Neon Auth (Better Auth) verifies **scrypt** hashes (`<32 hex salt>:<128 hex key>`,
+N=16384, r=16, p=1, dkLen=64). The browser hashes the password
+(`hashPassword()` in `src/lib/neon.ts`) and the RPC stores the hash, so no
+plaintext password ever reaches the database. Older bcrypt hashes cannot be
+verified by Better Auth — use *Reset password* in the Employees screen to migrate
+an account.
 
-```sql
-update public.app_settings
-set setting_value = '07:30', updated_at = now()
-where setting_key = 'late_after';
+## Accounts
+
+- Admins sign in with their real email (e.g. `admin@attendance-login.example.com`).
+- Employees sign in with a **username**; the app appends
+  `@attendance-login.example.com` before calling Neon Auth.
+- New accounts are created from **Employees → Add Employee**. The first admin must
+  exist in the database already.
+
+## Deployment (Vercel)
+
+1. Push this repository to GitHub.
+2. Import the repo in Vercel (framework preset **Vite**, build `npm run build`,
+   output `dist`).
+3. Add `VITE_NEON_AUTH_URL` and `VITE_NEON_DATA_API_URL` for Production and Preview.
+4. Register the deployment domain as a Neon Auth trusted origin:
+
+   ```bash
+   neon neon-auth domain add https://<project>.vercel.app
+   neon neon-auth domain list
+   ```
+
+5. `vercel.json` rewrites every path to `index.html` so client-side routes work.
+
+Without a registered origin, Neon Auth rejects browser sign-in requests from the
+deployed domain.
+
+## Verification
+
+```bash
+node scripts/e2e-neon.mjs              # auth + RPC + RLS flow against live Neon
+node scripts/ui-login.mjs admin@attendance-login.example.com 'AdminPassword123!' out.png
 ```
 
-## Security notes and production hardening
-- RLS protects profile and attendance reads. Browser clients cannot insert attendance or read QR token hashes.
-- Edge Functions validate the signed-in user and role. Attendance time and work date are generated server-side.
-- QR token contents are random 256-bit values; only their SHA-256 hashes are stored in the database.
-- A rotating QR prevents old screenshots from being reused after expiry, but **does not prove physical presence** against a person who relays a live QR to someone elsewhere. For stronger presence assurance, add office geofencing, a managed kiosk, or office-network verification, and rate limiting.
-- Before real company deployment, restrict CORS to your production domain, enable Supabase Auth rate limits, require strong passwords, arrange password resets, create backups, and test recovery procedures.
-- Excel exports are real `.xlsx` workbooks. Future enhancements can add monthly absence summaries, multiple branches and configurable shifts.
-# qr-attendance-system-Qardho
+`scripts/` also contains local helpers (`audit-neon.mjs`, `apply-sql.mjs`,
+`cdp-check.mjs`, UI drivers). They are development tools, not part of the bundle.
