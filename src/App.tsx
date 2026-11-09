@@ -6,6 +6,7 @@ import {
   onAuthChange,
   restoreSession,
   signOut as endSession,
+  withTimeout,
 } from './lib/neon';
 import type { Profile } from './lib/types';
 import Login from './pages/Login';
@@ -32,11 +33,11 @@ export default function App() {
         return;
       }
       try {
-        const { data } = await db
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .maybeSingle();
+        const { data } = await withTimeout(
+          db.from('profiles').select('*').eq('id', user.id).maybeSingle(),
+          15_000,
+          'Profile load timed out.'
+        );
         if (alive) setProfile(data as Profile | null);
       } catch (e) {
         console.error('Profile load error:', e);

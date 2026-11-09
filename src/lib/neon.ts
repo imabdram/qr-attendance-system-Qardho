@@ -55,6 +55,23 @@ export const auth = createAuthClient(NEON_AUTH_URL);
 
 export type AuthUser = { id: string; email?: string; name?: string };
 
+/** Rejects instead of letting a stalled request spin forever in the UI. */
+export function withTimeout<T>(promise: PromiseLike<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    Promise.resolve(promise).then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
 let currentUser: AuthUser | null = null;
 const listeners = new Set<(user: AuthUser | null) => void>();
 
@@ -86,7 +103,10 @@ export async function getJwt(): Promise<string | null> {
     return jwtCache.token;
   }
   try {
-    const res = await fetch(`${AUTH_BASE}/token`, { credentials: 'include' });
+    const res = await fetch(`${AUTH_BASE}/token`, {
+      credentials: 'include',
+      signal: AbortSignal.timeout(10_000),
+    });
     if (!res.ok) return null;
     const { token } = (await res.json()) as { token?: string };
     if (!token) return null;
@@ -118,11 +138,21 @@ export async function signIn(
   password: string
 ): Promise<{ user: AuthUser | null; error: string | null }> {
   jwtCache = null;
-  const { data, error } = await (auth.signIn.email({ email, password }) as Promise<{
-    data: { user?: AuthUser } | null;
-    error: { message?: string } | null;
-  }>);
+  let result: { data: { user?: AuthUser } | null; error: { message?: string } | null };
+  try {
+    result = await withTimeout(
+      auth.signIn.email({ email, password }) as Promise<{
+        data: { user?: AuthUser } | null;
+        error: { message?: string } | null;
+      }>,
+      25_000,
+      'Sign-in timed out. Please check your connection and try again.'
+    );
+  } catch (err) {
+    return { user: null, error: (err as Error).message || 'Sign-in failed.' };
+  }
 
+  const { data, error } = result;
   if (error) {
     return { user: null, error: error.message || 'Sign in failed.' };
   }
@@ -144,9 +174,13 @@ export async function signOut(): Promise<void> {
 /** Reads the persisted Neon Auth session (survives page reloads). */
 export async function getSessionUser(): Promise<AuthUser | null> {
   try {
-    const { data } = (await auth.getSession()) as {
-      data: { user?: AuthUser; session?: { user?: AuthUser } } | null;
-    };
+    const { data } = (await withTimeout(
+      auth.getSession() as Promise<{
+        data: { user?: AuthUser; session?: { user?: AuthUser } } | null;
+      }>,
+      12_000,
+      'Session lookup timed out.'
+    )) as { data: { user?: AuthUser; session?: { user?: AuthUser } } | null };
     return data?.user ?? data?.session?.user ?? null;
   } catch {
     return null;
