@@ -107,3 +107,4 @@ where setting_key = 'late_after';
 - A rotating QR prevents old screenshots from being reused after expiry, but **does not prove physical presence** against a person who relays a live QR to someone elsewhere. For stronger presence assurance, add office geofencing, a managed kiosk, or office-network verification, and rate limiting.
 - Before real company deployment, restrict CORS to your production domain, enable Supabase Auth rate limits, require strong passwords, arrange password resets, create backups, and test recovery procedures.
 - Excel exports are real `.xlsx` workbooks. Future enhancements can add monthly absence summaries, multiple branches and configurable shifts.
+# qr-attendance-system-Qardho
