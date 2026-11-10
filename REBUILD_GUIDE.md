@@ -67,7 +67,7 @@ npm install
 Delete the old `.neon` link file if it came along (it is git-ignored, but check):
 
 ```bash
-rm -f .neon
+rm -f .neon            # Windows PowerShell: Remove-Item .neon
 ```
 
 ### Step 2 — Create and link a Neon project
