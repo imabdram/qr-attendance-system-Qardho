@@ -284,17 +284,6 @@
   100%{box-shadow:0 0 0 0 rgba(220,38,38,0)}
 }
 .live-dot.pulsing{animation:qardho-pulse 1.8s infinite}
-.role-badge{
-  display:inline-flex;
-  align-items:center;
-  padding:3px 8px;
-  border-radius:6px;
-  font-size:11px;
-  font-weight:700;
-  white-space:nowrap;
-}
-.role-badge.admin{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}
-.role-badge.employee{background:#f3f4f6;color:#374151;border:1px solid #e5e7eb}
 @media print{
   .print-only-title{color:var(--qardho-ink) !important}
   .print-only-sub{color:#6b7280 !important}
