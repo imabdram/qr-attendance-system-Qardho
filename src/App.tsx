@@ -114,7 +114,6 @@ export default function App() {
               <QrCode size={21} />
             </span>{' '}
             Qardho Attendance Portal
-            <span className="branch-pill">📍 Qardho Branch</span>
           </Link>
           <div className="top-actions">
             <span className="user-chip">
