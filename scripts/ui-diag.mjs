@@ -15,6 +15,12 @@ const PORT = 9336;
 const profileDir = join(tmpdir(), 'dsh-chrome-diag-' + Date.now());
 mkdirSync(profileDir, { recursive: true });
 
+const ADMIN_LOGIN = process.env.ADMIN_EMAIL || 'admin';
+if (!process.env.ADMIN_PASSWORD) {
+  console.error('Set ADMIN_PASSWORD (and optionally ADMIN_EMAIL) before running this script.');
+  process.exit(1);
+}
+
 const chrome = spawn(
   CHROME,
   [
@@ -98,8 +104,8 @@ const typeInto = async (sel, text) => {
   await send('Input.insertText', { text });
   await sleep(150);
 };
-await typeInto('input[autocomplete="username"]', process.env.ADMIN_EMAIL || 'admin');
-await typeInto('input[autocomplete="current-password"]', process.env.ADMIN_PASSWORD || 'AdminPassword123!');
+await typeInto('input[autocomplete="username"]', ADMIN_LOGIN);
+await typeInto('input[autocomplete="current-password"]', process.env.ADMIN_PASSWORD);
 await sleep(600);
 
 console.log('clicking sign in…');

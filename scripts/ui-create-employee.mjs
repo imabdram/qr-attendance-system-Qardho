@@ -14,6 +14,12 @@ const PORT = 9335;
 const profileDir = join(tmpdir(), 'dsh-chrome-profile-create');
 mkdirSync(profileDir, { recursive: true });
 
+const ADMIN_LOGIN = process.env.ADMIN_EMAIL || 'admin';
+if (!process.env.ADMIN_PASSWORD) {
+  console.error('Set ADMIN_PASSWORD (and optionally ADMIN_EMAIL) before running this script.');
+  process.exit(1);
+}
+
 const stamp = Date.now().toString().slice(-6);
 const emp = {
   fullName: 'UI Test Employee',
@@ -97,8 +103,8 @@ for (let i = 0; i < 40; i++) {
 }
 await sleep(400);
 
-await typeInto(`document.querySelector('input[autocomplete="username"]')`, process.env.ADMIN_EMAIL || 'admin');
-await typeInto(`document.querySelector('input[autocomplete="current-password"]')`, process.env.ADMIN_PASSWORD || 'AdminPassword123!');
+await typeInto(`document.querySelector('input[autocomplete="username"]')`, ADMIN_LOGIN);
+await typeInto(`document.querySelector('input[autocomplete="current-password"]')`, process.env.ADMIN_PASSWORD);
 await evaluate(`document.querySelector('form button.primary').click()`);
 await sleep(5000);
 

@@ -129,8 +129,55 @@ export const db = createClient(DATA_API_BASE, 'neon-data-api', {
     autoRefreshToken: false,
     detectSessionInUrl: false,
   },
+  global: {
+    fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+      const response = await fetch(input, init);
+      if (response.status === 401) unauthorizedHandler?.();
+      return response;
+    },
+  },
   accessToken: async () => getJwt(),
 });
+
+/** Row shape shared by the profile lookups (kept loose on purpose). */
+export type ProfileRow = {
+  id: string;
+  role: string;
+  is_active: boolean;
+  [key: string]: unknown;
+};
+
+let profileCall: { id: string; at: number; promise: Promise<ProfileRow | null> } | null = null;
+
+/**
+ * Loads a profile and de-duplicates concurrent/repeated calls (Login and App both
+ * need it right after sign-in, so this collapses them into one request).
+ */
+export function loadProfile(userId: string): Promise<ProfileRow | null> {
+  if (profileCall && profileCall.id === userId && Date.now() - profileCall.at < 5_000) {
+    return profileCall.promise;
+  }
+  const promise = (async () => {
+    const { data, error } = await withTimeout(
+      db.from('profiles').select('*').eq('id', userId).maybeSingle(),
+      15_000,
+      'Profile load timed out.'
+    );
+    if (error) throw new Error(error.message);
+    return (data as ProfileRow | null) ?? null;
+  })();
+  profileCall = { id: userId, at: Date.now(), promise };
+  promise.catch(() => {
+    if (profileCall?.promise === promise) profileCall = null;
+  });
+  return promise;
+}
+
+/** Called by the Data API transport when a request comes back 401. */
+let unauthorizedHandler: (() => void) | null = null;
+export function setUnauthorizedHandler(handler: (() => void) | null) {
+  unauthorizedHandler = handler;
+}
 
 /** Sign in with the internal attendance email + password. */
 export async function signIn(

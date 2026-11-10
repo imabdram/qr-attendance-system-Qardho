@@ -3,12 +3,14 @@ import { Routes, Route, Link } from 'react-router-dom';
 import { db } from '../lib/neon';
 import {
   generateQrToken,
+  revokeQrTokens,
   createEmployeeAccount,
   adminDeleteEmployee,
   adminResetPassword,
   adminUpdateEmployee,
 } from '../lib/api';
 import type { Attendance, Profile } from '../lib/types';
+import Notice from '../components/Notice';
 import { todayLocal, timeLocal, dateLabel, isFridayLocal } from '../lib/date';
 import {
   Users,
@@ -27,6 +29,7 @@ import {
   Pencil,
   Trash2,
   KeyRound,
+  ShieldCheck,
   X,
   Filter,
 } from 'lucide-react';
@@ -43,20 +46,22 @@ function Dashboard() {
   const [thresholdInput, setThresholdInput] = useState('09:00');
   const [savingThreshold, setSavingThreshold] = useState(false);
   const [shiftFilter, setShiftFilter] = useState<'all' | 'morning' | 'afternoon'>('all');
+  const [error, setError] = useState('');
+  const polling = useRef(false);
 
   const saveThreshold = async () => {
     if (!thresholdInput || !editingThreshold) return;
     setSavingThreshold(true);
     const key = editingThreshold === 'morning' ? 'late_after_morning' : 'late_after_afternoon';
-    const { error } = await db
+    const { error: saveError } = await db
       .from('app_settings')
       .upsert({
         setting_key: key,
         setting_value: thresholdInput,
         updated_at: new Date().toISOString(),
       });
-    if (error) {
-      alert(error.message);
+    if (saveError) {
+      setError(saveError.message);
     } else {
       if (editingThreshold === 'morning') {
         setMorningLateAt(thresholdInput);
@@ -69,32 +74,43 @@ function Dashboard() {
     setSavingThreshold(false);
   };
 
-  const load = async (silent = false) => {
+  /** Today's arrivals only — this is what the 10s poll refreshes. */
+  const loadAttendance = async (silent = false) => {
+    if (polling.current) return;
+    polling.current = true;
     if (!silent) setLoading(true);
     try {
-      // Query profiles without explicit shift column in the joined select to prevent PostgREST column missing crashes
-      const { data: a, error: aErr } = await db
+      const { data, error: queryError } = await db
         .from('attendance')
         .select('*, profiles!attendance_employee_id_fkey(full_name,employee_number,department)')
         .eq('work_date', todayLocal())
         .order('time_in');
 
-      if (aErr) {
-        console.error('Attendance query error:', aErr);
+      if (queryError) {
+        setError(queryError.message);
       } else {
-        setRows((a || []) as any);
+        setRows((data || []) as any);
       }
+    } catch (err) {
+      setError((err as Error).message || 'Could not load attendance.');
+    } finally {
+      polling.current = false;
+      if (!silent) setLoading(false);
+    }
+  };
 
-      const { data: p } = await db
+  /** Staff list and late thresholds change rarely; load them on demand. */
+  const loadReference = async () => {
+    try {
+      const { data: p, error: pError } = await db
         .from('profiles')
         .select('*')
         .eq('role', 'employee')
         .eq('is_active', true);
-      setStaff((p || []) as Profile[]);
+      if (pError) setError(pError.message);
+      else setStaff((p || []) as Profile[]);
 
-      const { data: s } = await db
-        .from('app_settings')
-        .select('setting_key,setting_value');
+      const { data: s } = await db.from('app_settings').select('setting_key,setting_value');
       if (s) {
         const morn = s.find((x) => x.setting_key === 'late_after_morning')?.setting_value;
         const legacy = s.find((x) => x.setting_key === 'late_after')?.setting_value;
@@ -104,17 +120,31 @@ function Dashboard() {
         if (aft) setAfternoonLateAt(aft);
       }
     } catch (err) {
-      console.error('Error loading attendance dashboard:', err);
-    } finally {
-      setLoading(false);
+      setError((err as Error).message || 'Could not load settings.');
     }
+  };
+
+  const load = async (silent = false) => {
+    if (!silent) setLoading(true);
+    await Promise.all([loadAttendance(true), loadReference()]);
+    setLoading(false);
   };
 
   useEffect(() => {
     load();
-    // Neon's Data API has no Realtime channel: poll today's attendance every 10s.
-    const interval = setInterval(() => load(true), 10000);
-    return () => clearInterval(interval);
+    // Neon's Data API has no Realtime channel: refresh today's arrivals every 10s,
+    // but skip while the tab is in the background.
+    const interval = setInterval(() => {
+      if (!document.hidden) void loadAttendance(true);
+    }, 10000);
+    const onVisible = () => {
+      if (!document.hidden) void loadAttendance(true);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   const filteredStaff = shiftFilter === 'all'
@@ -162,6 +192,11 @@ function Dashboard() {
           </button>
         </div>
       </div>
+      {error && (
+        <Notice kind="error" onClose={() => setError('')}>
+          {error}
+        </Notice>
+      )}
       <div className="stats-grid">
         <Stat
           icon={<Users />}
@@ -403,7 +438,12 @@ function Employees() {
   const [deleteEmp, setDeleteEmp] = useState<Profile | null>(null);
 
   const load = async () => {
-    const { data } = await db.from('profiles').select('*').order('full_name');
+    const { data, error } = await db.from('profiles').select('*').order('full_name');
+    if (error) {
+      setMsgType('error');
+      setMsg(error.message);
+      return;
+    }
     setList((data || []) as Profile[]);
   };
 
@@ -507,12 +547,18 @@ function Employees() {
   };
 
   const toggle = async (p: Profile) => {
-    const { error } = await db
+    const { error: toggleError } = await db
       .from('profiles')
       .update({ is_active: !p.is_active })
       .eq('id', p.id);
-    if (error) alert(error.message);
-    else load();
+    if (toggleError) {
+      setMsgType('error');
+      setMsg(toggleError.message);
+    } else {
+      setMsgType('success');
+      setMsg(`${p.full_name} is now ${p.is_active ? 'deactivated' : 'active'}.`);
+      await load();
+    }
   };
 
   const filtered = list.filter((x) => {
@@ -974,6 +1020,8 @@ function QrDisplay() {
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(false);
   const [countdown, setCountdown] = useState(intervalSec);
+  const [revoking, setRevoking] = useState(false);
+  const [notice, setNotice] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
 
   const modeRef = useRef(mode);
   modeRef.current = mode;
@@ -1002,7 +1050,7 @@ function QrDisplay() {
       // Auto: interval + 25 seconds
       const durationSeconds =
         modeRef.current === 'fixed'
-          ? 31536000
+          ? 86400
           : modeRef.current === 'manual'
           ? 86400
           : intervalRef.current + 25;
@@ -1048,6 +1096,33 @@ function QrDisplay() {
     window.print();
   };
 
+  const revokeAll = async () => {
+    const ok = window.confirm(
+      'Revoke every active QR code?\n\nAnyone scanning the current code will be refused until you generate a new one.'
+    );
+    if (!ok) return;
+    setRevoking(true);
+    try {
+      const res = await revokeQrTokens();
+      setNotice({ kind: 'success', text: res.message || 'QR codes revoked.' });
+      await refresh();
+    } catch (e: any) {
+      setNotice({ kind: 'error', text: e.message || 'Could not revoke QR codes.' });
+    } finally {
+      setRevoking(false);
+    }
+  };
+
+  const expiresLabel = expires
+    ? new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Africa/Mogadishu',
+        day: '2-digit',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(new Date(expires))
+    : '';
+
   return (
     <div className="qr-page">
       <div className="page-head">
@@ -1056,10 +1131,21 @@ function QrDisplay() {
           <h1>Qardho QR Display</h1>
           <p className="muted">Configure rotation behavior and display or print your QR code.</p>
         </div>
-        <button className="secondary" onClick={refresh} disabled={loading}>
-          <RefreshCw size={16} /> {loading ? 'Refreshing…' : 'Regenerate QR'}
-        </button>
+        <div className="page-head-actions">
+          <button className="secondary" onClick={revokeAll} disabled={revoking || loading}>
+            <ShieldCheck size={16} /> {revoking ? 'Revoking…' : 'Revoke QR Codes'}
+          </button>
+          <button className="secondary" onClick={refresh} disabled={loading}>
+            <RefreshCw size={16} /> {loading ? 'Refreshing…' : 'Regenerate QR'}
+          </button>
+        </div>
       </div>
+
+      {notice && (
+        <div className={`alert ${notice.kind}`} role="status" aria-live="polite">
+          {notice.text}
+        </div>
+      )}
 
       {/* Mode Controls */}
       <div className="qr-config-panel">
@@ -1086,7 +1172,7 @@ function QrDisplay() {
             className={`qr-mode-tab ${mode === 'fixed' ? 'active' : ''}`}
             onClick={() => handleModeChange('fixed')}
           >
-            <Pin size={15} /> Fixed (Permanent)
+            <Pin size={15} /> 24-Hour QR
           </button>
         </div>
 
@@ -1139,7 +1225,8 @@ function QrDisplay() {
         {mode === 'fixed' && (
           <div style={{ textAlign: 'center' }}>
             <p className="tiny muted">
-              This QR code is <strong>permanent</strong> (valid for 1 year). Perfect for printing and framing on a wall or reception desk.
+              Valid for <strong>24 hours</strong> — print it for the day and reprint the poster
+              tomorrow. Older codes stop working automatically.
             </p>
             <div className="qr-action-row">
               <button className="primary" onClick={printQR}>
@@ -1153,6 +1240,10 @@ function QrDisplay() {
       {/* Printable Heading for printouts */}
       <h1 className="print-only-title">Qardho Office Attendance Check-In</h1>
       <p className="print-only-sub">Qardho Branch · Scan this QR code with your phone camera to record Time In.</p>
+      <p className="print-only-expiry">
+        Valid until <strong>{expiresLabel || '—'}</strong> · Ask the administrator for a fresh poster
+        after this time.
+      </p>
 
       {/* Main QR Display Card */}
       <section className="qr-display-card">
@@ -1170,7 +1261,7 @@ function QrDisplay() {
             }}
           />{' '}
           {mode === 'fixed'
-            ? 'PERMANENT FIXED QR'
+            ? '24-HOUR QR'
             : mode === 'manual'
             ? 'STATIC (CHANGE ON DEMAND)'
             : 'LIVE ROTATING QR'}
@@ -1184,22 +1275,17 @@ function QrDisplay() {
             <h2>Scan to record Time In</h2>
             <p className="muted">
               {mode === 'fixed'
-                ? 'Permanent QR code. Employees can scan anytime.'
+                ? 'Valid for 24 hours. Employees can scan it until it expires.'
                 : mode === 'manual'
                 ? 'Only updates when an administrator refreshes it.'
                 : `Automatically changes every ${intervalSec} seconds.`}
             </p>
 
             <div className="expiry">
-              {mode === 'fixed' ? (
+              {mode === 'fixed' || mode === 'manual' ? (
                 <>
                   <Pin size={14} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
-                  <strong>Fixed permanent QR</strong>
-                </>
-              ) : mode === 'manual' ? (
-                <>
-                  <Hand size={14} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
-                  <strong>Changes when you say</strong>
+                  Expires <strong>{expiresLabel}</strong>
                 </>
               ) : (
                 <>
@@ -1223,30 +1309,58 @@ function QrDisplay() {
 }
 
 function Reports() {
+  const PAGE = 500;
   const [from, setFrom] = useState(todayLocal());
   const [to, setTo] = useState(todayLocal());
   const [shiftFilter, setShiftFilter] = useState<'all' | 'morning' | 'afternoon'>('all');
+  const [employeeId, setEmployeeId] = useState<string>('all');
+  const [employees, setEmployees] = useState<Profile[]>([]);
   const [rows, setRows] = useState<Attendance[]>([]);
+  const [limit, setLimit] = useState(PAGE);
+  const [hasMore, setHasMore] = useState(false);
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const load = async () => {
+  const load = async (nextLimit = limit) => {
+    if (from > to) {
+      setError('The start date is after the end date.');
+      return;
+    }
+    setError('');
     setLoading(true);
-    const { data, error } = await db
+    let query = db
       .from('attendance')
       .select('*, profiles!attendance_employee_id_fkey(full_name,employee_number,department)')
       .gte('work_date', from)
-      .lte('work_date', to)
-      .order('work_date')
-      .order('time_in');
+      .lte('work_date', to);
 
-    if (error) {
-      console.error('Reports load error:', error);
+    if (employeeId !== 'all') {
+      query = query.eq('employee_id', employeeId);
     }
-    setRows((data || []) as any);
+
+    const { data, error: queryError } = await query
+      .order('work_date')
+      .order('time_in')
+      .limit(nextLimit + 1);
+
+    if (queryError) {
+      setError(queryError.message);
+      setRows([]);
+      setHasMore(false);
+    } else {
+      const list = (data || []) as any[];
+      setHasMore(list.length > nextLimit);
+      setRows(list.slice(0, nextLimit));
+      setLimit(nextLimit);
+    }
     setLoading(false);
   };
 
   useEffect(() => {
+    db.from('profiles')
+      .select('id,full_name,role')
+      .order('full_name')
+      .then(({ data }) => setEmployees((data || []) as Profile[]));
     load();
   }, []);
 
@@ -1308,6 +1422,28 @@ function Reports() {
             <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
           </label>
           <label>
+            Employee
+            <select
+              value={employeeId}
+              onChange={(e) => setEmployeeId(e.target.value)}
+              style={{
+                border: '1px solid #dce5ee',
+                borderRadius: '8px',
+                padding: '11px 12px',
+                outline: 'none',
+                background: 'white',
+                color: '#111827',
+              }}
+            >
+              <option value="all">All employees</option>
+              {employees.map((emp) => (
+                <option key={emp.id} value={emp.id}>
+                  {emp.full_name} ({emp.username})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
             Shift
             <select
               value={shiftFilter}
@@ -1326,17 +1462,40 @@ function Reports() {
               <option value="afternoon">Afternoon Shift</option>
             </select>
           </label>
-          <button className="secondary" onClick={load}>
+          <button className="secondary" onClick={() => load()}>
             <RefreshCw size={16} /> Apply filter
           </button>
         </div>
+        {error && (
+          <Notice kind="error" onClose={() => setError('')}>
+            {error}
+          </Notice>
+        )}
         <div className="panel-head">
-          <h2>{filteredRows.length} attendance records</h2>
+          <h2>
+            {filteredRows.length}
+            {hasMore ? '+' : ''} attendance records
+          </h2>
           <span className="muted">
             {from} — {to}
           </span>
         </div>
-        {loading ? <p className="muted">Loading…</p> : <AttendanceTable rows={filteredRows} />}
+        {loading ? (
+          <p className="muted">Loading…</p>
+        ) : (
+          <>
+            <AttendanceTable rows={filteredRows} />
+            {hasMore && (
+              <button
+                className="secondary"
+                style={{ marginTop: '14px' }}
+                onClick={() => load(limit + PAGE)}
+              >
+                Load {PAGE} more records
+              </button>
+            )}
+          </>
+        )}
       </section>
     </>
   );

@@ -2,25 +2,19 @@
  * Deletes leftover QA/UI test accounts (usernames starting with ui/qa test prefixes).
  * Usage: node scripts/cleanup-test-employees.mjs
  */
-import { readFileSync } from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
+import { loadEnvLocal, adminCredentials } from './lib/admin.mjs';
 
-const envText = readFileSync(new URL('../.env.local', import.meta.url), 'utf8');
-for (const line of envText.split(/\r?\n/)) {
-  const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-  if (!m) continue;
-  let v = m[2];
-  if (v.startsWith('"') && v.endsWith('"')) v = v.slice(1, -1);
-  process.env[m[1]] ??= v;
-}
+loadEnvLocal();
 
 const AUTH = process.env.VITE_NEON_AUTH_URL.replace(/\/$/, '');
 const API = process.env.VITE_NEON_DATA_API_URL.replace(/\/rest\/v1\/?$/, '');
+const ADMIN = adminCredentials();
 
 const res = await fetch(`${AUTH}/sign-in/email`, {
   method: 'POST',
   headers: { 'Content-Type': 'application/json', Origin: 'http://localhost:5173' },
-  body: JSON.stringify({ email: 'admin@attendance-login.example.com', password: 'AdminPassword123!' }),
+  body: JSON.stringify({ email: ADMIN.email, password: ADMIN.password }),
 });
 const cookie = res.headers.getSetCookie()[0].split(';')[0];
 const { token } = await (await fetch(`${AUTH}/token`, { headers: { Origin: 'http://localhost:5173', Cookie: cookie } })).json();

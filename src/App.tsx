@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Routes, Route, Navigate, Link, useNavigate } from 'react-router-dom';
 import {
-  db,
   isBackendConfigured,
+  loadProfile,
   onAuthChange,
   restoreSession,
+  setUnauthorizedHandler,
   signOut as endSession,
-  withTimeout,
 } from './lib/neon';
 import type { Profile } from './lib/types';
 import Login from './pages/Login';
@@ -27,32 +27,28 @@ export default function App() {
       return;
     }
 
-    const loadProfile = async (user: { id: string } | null) => {
+    const load = async (user: { id: string } | null) => {
       if (!user) {
         if (alive) setProfile(null);
         return;
       }
       try {
-        const { data } = await withTimeout(
-          db.from('profiles').select('*').eq('id', user.id).maybeSingle(),
-          15_000,
-          'Profile load timed out.'
-        );
-        if (alive) setProfile(data as Profile | null);
+        const row = await loadProfile(user.id);
+        if (alive) setProfile(row as Profile | null);
       } catch (e) {
         console.error('Profile load error:', e);
       }
     };
 
     restoreSession()
-      .then((user) => loadProfile(user))
+      .then((user) => load(user))
       .catch((e) => console.error('Session load error:', e))
       .finally(() => {
         if (alive) setLoading(false);
       });
 
     const unsubscribe = onAuthChange((user) => {
-      if (alive) loadProfile(user);
+      if (alive) load(user);
     });
 
     return () => {
@@ -60,6 +56,16 @@ export default function App() {
       unsubscribe();
     };
   }, []);
+
+  // A 401 from the Data API means the JWT/session is gone: drop it and ask to sign in again.
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      void endSession();
+      setProfile(null);
+      nav('/login?expired=1');
+    });
+    return () => setUnauthorizedHandler(null);
+  }, [nav]);
 
   const signOut = async () => {
     await endSession();
@@ -79,11 +85,11 @@ export default function App() {
           <p className="muted">
             The app needs your Neon Auth URL and Data API URL to sign users in and record attendance.
           </p>
-          <div className="alert" style={{ background: '#fdf6f6', color: '#3f1d22', fontSize: '12px', lineHeight: '1.6' }}>
+          <div className="alert" style={{ background: '#f7f8fa', color: '#3f1d22', fontSize: '12px', lineHeight: '1.6' }}>
             <strong>Step 1:</strong> Open your Neon project &rarr; <strong>Auth</strong> / <strong>Data API</strong><br />
             <strong>Step 2:</strong> Copy both endpoint URLs<br />
             <strong>Step 3:</strong> Put them in a <code>.env.local</code> file in this project:
-            <pre style={{ margin: '8px 0 0', padding: '10px', background: '#160709', color: '#f5d9d9', borderRadius: '8px', overflowX: 'auto', fontSize: '11px' }}>
+            <pre style={{ margin: '8px 0 0', padding: '10px', background: '#111827', color: '#f5d9d9', borderRadius: '8px', overflowX: 'auto', fontSize: '11px' }}>
               VITE_NEON_AUTH_URL=https://…/neondb/auth&#10;VITE_NEON_DATA_API_URL=https://…/neondb/rest/v1
             </pre>
           </div>

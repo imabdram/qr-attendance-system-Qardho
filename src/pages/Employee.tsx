@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { recordAttendance } from '../lib/api';
 import { db } from '../lib/neon';
+import Notice from '../components/Notice';
 import type { Profile, Attendance } from '../lib/types';
 import { timeLocal, todayLocal, dateLabel } from '../lib/date';
 import {
@@ -26,13 +27,17 @@ export default function Employee({ profile }: { profile: Profile }) {
 
   const [history, setHistory] = useState<Attendance[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [lateMorning, setLateMorning] = useState('09:00');
+  const [lateAfternoon, setLateAfternoon] = useState('16:30');
 
   const busyRef = useRef(false);
 
   const loadData = async () => {
     setLoadingHistory(true);
+    setLoadError('');
     try {
-      const [{ data: todayData }, { data: historyData }] = await Promise.all([
+      const [todayRes, historyRes, settingsRes] = await Promise.all([
         db
           .from('attendance')
           .select('*')
@@ -44,8 +49,15 @@ export default function Employee({ profile }: { profile: Profile }) {
           .select('*')
           .eq('employee_id', profile.id)
           .order('work_date', { ascending: false }),
+        db.from('app_settings').select('setting_key,setting_value'),
       ]);
 
+      const failure = todayRes.error || historyRes.error;
+      if (failure) {
+        setLoadError(failure.message);
+      }
+
+      const todayData = todayRes.data;
       if (todayData) {
         setDone(true);
         setTodayRecord(todayData as Attendance);
@@ -54,9 +66,18 @@ export default function Employee({ profile }: { profile: Profile }) {
         setKind('success');
       }
 
-      setHistory((historyData || []) as Attendance[]);
-    } catch (e) {
-      console.error('Error loading employee attendance:', e);
+      setHistory((historyRes.data || []) as Attendance[]);
+
+      const settings = settingsRes.data;
+      if (settings) {
+        const morn = settings.find((s) => s.setting_key === 'late_after_morning')?.setting_value;
+        const legacy = settings.find((s) => s.setting_key === 'late_after')?.setting_value;
+        const aft = settings.find((s) => s.setting_key === 'late_after_afternoon')?.setting_value;
+        if (morn || legacy) setLateMorning(morn || legacy || '09:00');
+        if (aft) setLateAfternoon(aft);
+      }
+    } catch (e: any) {
+      setLoadError(e.message || 'Could not load your attendance.');
     } finally {
       setLoadingHistory(false);
     }
@@ -124,12 +145,20 @@ export default function Employee({ profile }: { profile: Profile }) {
           <p className="muted" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '4px' }}>
             <span>@{profile.username} · {profile.employee_number}</span>
             <span className={`shift-badge ${profile.shift || 'morning'}`}>
-              {(profile.shift || 'morning') === 'afternoon' ? 'Afternoon Shift (Late after 4:30 PM)' : 'Morning Shift (Late after 9:00 AM)'}
+              {(profile.shift || 'morning') === 'afternoon'
+                ? `Afternoon Shift (late after ${lateAfternoon})`
+                : `Morning Shift (late after ${lateMorning})`}
             </span>
           </p>
         </div>
         <div className="avatar">{profile.full_name.slice(0, 1).toUpperCase()}</div>
       </div>
+
+      {loadError && (
+        <Notice kind="error" onClose={() => setLoadError('')}>
+          {loadError}
+        </Notice>
+      )}
 
       {/* Navigation Tabs */}
       <div className="tabs-nav">

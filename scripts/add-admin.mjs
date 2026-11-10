@@ -4,24 +4,17 @@
  *   node scripts/add-admin.mjs <email> <password> ["Full Name"] [username]
  *
  * Example:
- *   node scripts/add-admin.mjs dhomdesign@gmail.com 'QardhoAdmin2026!' "Dhom Design"
+ *   node scripts/add-admin.mjs name@example.com 'A-Strong-Password' "Full Name"
  *
  * Running it again with the same email sets a new password.
  * Needs ADMIN_EMAIL / ADMIN_PASSWORD of an existing administrator
- * (defaults to the bootstrap admin).
+ * (set them in the shell or in the git-ignored .env.local).
  */
-import { readFileSync } from 'node:fs';
 import { scryptSync, randomBytes } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
+import { loadEnvLocal, adminCredentials } from './lib/admin.mjs';
 
-const envText = readFileSync(new URL('../.env.local', import.meta.url), 'utf8');
-for (const line of envText.split(/\r?\n/)) {
-  const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-  if (!m) continue;
-  let v = m[2];
-  if (v.startsWith('"') && v.endsWith('"')) v = v.slice(1, -1);
-  process.env[m[1]] ??= v;
-}
+loadEnvLocal();
 
 const [email, password, fullName, usernameArg] = process.argv.slice(2);
 if (!email || !password) {
@@ -62,10 +55,8 @@ async function signIn(e, p) {
   });
 }
 
-const admin = await signIn(
-  process.env.ADMIN_EMAIL || 'admin@attendance-login.example.com',
-  process.env.ADMIN_PASSWORD || 'AdminPassword123!'
-);
+const ADMIN = adminCredentials();
+const admin = await signIn(ADMIN.email, ADMIN.password);
 
 const created = await admin.rpc('admin_create_user', {
   p_full_name: name,

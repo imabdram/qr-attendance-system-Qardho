@@ -73,7 +73,8 @@ neon data-api refresh-schema      # after adding/removing functions
 
 | Function | Purpose |
 | --- | --- |
-| `create_qr_token(p_duration_seconds)` | Issues a rotating QR token, stores only its SHA-256 hash |
+| `create_qr_token(p_duration_seconds)` | Issues a QR token (30 s – 24 h), stores only its SHA-256 hash |
+| `revoke_qr_tokens()` | Admin-only: invalidates every active QR code at once |
 | `scan_attendance(p_token)` | Validates the token and writes a Time In row (Mogadishu date, shift-aware late detection) |
 | `admin_create_user(...)` | Creates `neon_auth.user` + credential account + `public.profiles` row |
 | `admin_update_employee(...)` | Updates name / phone / department / shift |
@@ -109,8 +110,20 @@ node scripts/add-admin.mjs dhomdesign@gmail.com 'SomeStrongPassword!' "Dhom Desi
 ```
 
 Re-running the same command with the same email **changes that admin's password**.
-It signs in as an existing admin using `ADMIN_EMAIL` / `ADMIN_PASSWORD`
-(defaults to the bootstrap admin).
+It signs in as an existing admin using `ADMIN_EMAIL` / `ADMIN_PASSWORD`, which must
+be present in the shell or in the git-ignored `.env.local` (never in code):
+
+```env
+ADMIN_EMAIL=you@example.com
+ADMIN_PASSWORD=…
+```
+
+### QR code lifetime
+
+Every QR code expires within **24 hours** (rotating codes expire within a minute).
+There is no permanent option: a photographed permanent poster would allow check-in
+from anywhere. For a printed poster use the **24-Hour QR** mode and reprint daily,
+or press **Revoke QR Codes** if a code leaks.
 
 ## Deployment (Vercel)
 
@@ -133,8 +146,9 @@ deployed domain.
 ## Verification
 
 ```bash
-node scripts/e2e-neon.mjs              # auth + RPC + RLS flow against live Neon
-node scripts/ui-login.mjs admin@attendance-login.example.com 'AdminPassword123!' out.png
+# ADMIN_EMAIL / ADMIN_PASSWORD must be set (shell or .env.local)
+node scripts/e2e-neon.mjs              # auth + RPC + RLS + QR cap/revoke checks
+node scripts/ui-login.mjs admin 'the-password' out.png
 ```
 
 `scripts/` also contains local helpers (`audit-neon.mjs`, `apply-sql.mjs`,

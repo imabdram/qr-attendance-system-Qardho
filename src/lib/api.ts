@@ -22,6 +22,17 @@ export async function generateQrToken(
   return rpcData;
 }
 
+export async function revokeQrTokens(): Promise<{
+  success: boolean;
+  message: string;
+  revoked?: number;
+}> {
+  const { data, error } = await db.rpc('revoke_qr_tokens');
+  if (error) throw new Error(error.message);
+  if (!data?.success) throw new Error(data?.message || 'Could not revoke QR codes.');
+  return data;
+}
+
 export async function recordAttendance(token: string): Promise<{
   success: boolean;
   message: string;

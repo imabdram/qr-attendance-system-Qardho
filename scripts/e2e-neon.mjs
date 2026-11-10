@@ -4,23 +4,16 @@
  *
  *   node scripts/e2e-neon.mjs
  */
-import { readFileSync } from 'node:fs';
 import { scryptSync, randomBytes } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
+import { loadEnvLocal, adminCredentials } from './lib/admin.mjs';
 
-const envText = readFileSync(new URL('../.env.local', import.meta.url), 'utf8');
-for (const line of envText.split(/\r?\n/)) {
-  const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-  if (!m) continue;
-  let v = m[2];
-  if (v.startsWith('"') && v.endsWith('"')) v = v.slice(1, -1);
-  process.env[m[1]] ??= v;
-}
+loadEnvLocal();
 
 const AUTH = process.env.VITE_NEON_AUTH_URL.replace(/\/$/, '');
 const API = process.env.VITE_NEON_DATA_API_URL.replace(/\/rest\/v1\/?$/, '');
 const ORIGIN = 'http://localhost:5173';
-const ADMIN = { email: 'admin@attendance-login.example.com', password: 'AdminPassword123!' };
+const ADMIN = adminCredentials();
 const TEST = {
   username: 'qaflow' + Date.now().toString().slice(-6),
   password: 'FlowPass123!',
@@ -78,6 +71,16 @@ try {
 
   const emp = await signIn(`${TEST.username}@attendance-login.example.com`, TEST.password);
   check('new employee can sign in with scrypt password', Boolean(emp.token));
+
+  const capped = await admin.db.rpc('create_qr_token', { p_duration_seconds: 31536000 });
+  const cappedHours = (new Date(capped.data?.expires_at).getTime() - Date.now()) / 36e5;
+  check('QR lifetime capped at 24h', cappedHours > 23 && cappedHours <= 24.1, `${cappedHours.toFixed(1)}h`);
+
+  const doomed = await admin.db.rpc('create_qr_token', { p_duration_seconds: 45 });
+  const revoked = await admin.db.rpc('revoke_qr_tokens');
+  check('revoke_qr_tokens RPC', revoked.data?.success === true, revoked.data?.message);
+  const revokedScan = await emp.db.rpc('scan_attendance', { p_token: doomed.data?.token });
+  check('revoked QR is rejected', revokedScan.data?.success === false, revokedScan.data?.message);
 
   const qr = await admin.db.rpc('create_qr_token', { p_duration_seconds: 45 });
   check('create_qr_token RPC', Boolean(qr.data?.token), qr.data?.expires_at ?? qr.error?.message);

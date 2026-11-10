@@ -1,27 +1,20 @@
-import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { db, NEON_DATA_API_URL, signIn, signOut, withTimeout } from '../lib/neon';
-import { QrCode, LockKeyhole } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { loadProfile, signIn, signOut } from '../lib/neon';
+import type { Profile } from '../lib/types';
+import { LockKeyhole } from 'lucide-react';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [slow, setSlow] = useState(false);
-  const [error, setError] = useState('');
+  const [params] = useSearchParams();
+  const [error, setError] = useState(
+    params.get('expired') ? 'Your session expired. Please sign in again.' : ''
+  );
   const slowTimer = useRef<number | null>(null);
   const nav = useNavigate();
-
-  // Wake the database and the auth endpoint while the user is still typing: the
-  // first request of the day can wait on a suspended Neon compute.
-  useEffect(() => {
-    const t = window.setTimeout(() => {
-      void fetch(`${NEON_DATA_API_URL}/profiles?select=id&limit=1`, {
-        headers: { Accept: 'application/json' },
-      }).catch(() => {});
-    }, 400);
-    return () => window.clearTimeout(t);
-  }, []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,16 +43,9 @@ export default function Login() {
         return;
       }
 
-      let p: { role: string; is_active: boolean } | null = null;
-      let pErr: unknown = null;
+      let p: Profile | null = null;
       try {
-        const res = await withTimeout(
-          fetchProfile(user.id),
-          15_000,
-          'Loading your profile timed out.'
-        );
-        p = (res.data as { role: string; is_active: boolean } | null) ?? null;
-        pErr = res.error;
+        p = (await loadProfile(user.id)) as Profile | null;
       } catch (err) {
         setError(
           `Signed in, but your profile did not load (${(err as Error).message}). ` +
@@ -68,7 +54,7 @@ export default function Login() {
         return;
       }
 
-      if (pErr || !p) {
+      if (!p) {
         setError(
           'User authenticated, but no profile was found in the database. Please ensure your admin profile row exists in public.profiles table.'
         );
@@ -93,11 +79,10 @@ export default function Login() {
   return (
     <main className="login-wrap">
       <form className="login-card" onSubmit={submit}>
-        <div className="login-logo">
-          <QrCode size={30} />
-        </div>
-        <p className="eyebrow">QARDHO BRANCH · EMPLOYEE MANAGEMENT</p>
-        <h1>Welcome back</h1>
+        <h1>
+          Attendance Employee System
+          <span className="login-branch">Qardho branch</span>
+        </h1>
         <p className="muted">Sign in to record or manage attendance.</p>
         <label>
           Username or admin email
@@ -143,8 +128,4 @@ export default function Login() {
       </form>
     </main>
   );
-}
-
-function fetchProfile(userId: string) {
-  return db.from('profiles').select('role, is_active').eq('id', userId).maybeSingle();
 }
