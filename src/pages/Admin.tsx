@@ -394,6 +394,54 @@ function AttendanceTable({ rows }: { rows: Attendance[] }) {
   );
 }
 
+function AbsenceTable({ rows }: { rows: { date: string; employee: Profile }[] }) {
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Employee</th>
+            <th>Phone Number</th>
+            <th>Shift</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr>
+              <td colSpan={5} className="empty">
+                Nobody was absent in this range.
+              </td>
+            </tr>
+          ) : (
+            rows.map(({ date, employee }) => {
+              const shift = employee.shift || 'morning';
+              return (
+                <tr key={`${date}-${employee.id}`}>
+                  <td>{dateLabel(date)}</td>
+                  <td>
+                    <strong>{employee.full_name}</strong>
+                  </td>
+                  <td>{employee.employee_number || '—'}</td>
+                  <td>
+                    <span className={`shift-badge ${shift}`}>
+                      {shift === 'afternoon' ? 'Afternoon' : 'Morning'}
+                    </span>
+                  </td>
+                  <td>
+                    <span className="status absent">Absent</span>
+                  </td>
+                </tr>
+              );
+            })
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function Employees() {
   const [list, setList] = useState<Profile[]>([]);
   const [show, setShow] = useState(false);
@@ -1250,8 +1298,9 @@ function Reports() {
   const [from, setFrom] = useState(todayLocal());
   const [to, setTo] = useState(todayLocal());
   const [shiftFilter, setShiftFilter] = useState<'all' | 'morning' | 'afternoon'>('all');
-  const [employeeId, setEmployeeId] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'present' | 'late' | 'absent'>('all');
   const [employees, setEmployees] = useState<Profile[]>([]);
+  const [presentKeys, setPresentKeys] = useState<Set<string>>(new Set());
   const [rows, setRows] = useState<Attendance[]>([]);
   const [limit, setLimit] = useState(PAGE);
   const [hasMore, setHasMore] = useState(false);
@@ -1265,62 +1314,125 @@ function Reports() {
     }
     setError('');
     setLoading(true);
-    let query = db
-      .from('attendance')
-      .select('*, profiles!attendance_employee_id_fkey(full_name,employee_number,department)')
-      .gte('work_date', from)
-      .lte('work_date', to);
 
-    if (employeeId !== 'all') {
-      query = query.eq('employee_id', employeeId);
-    }
+    const [attendance, keys] = await Promise.all([
+      db
+        .from('attendance')
+        .select('*, profiles!attendance_employee_id_fkey(full_name,employee_number,department)')
+        .gte('work_date', from)
+        .lte('work_date', to)
+        .order('work_date')
+        .order('time_in')
+        .limit(nextLimit + 1),
+      // Slim copy of the range, used to work out who was absent.
+      db
+        .from('attendance')
+        .select('employee_id,work_date')
+        .gte('work_date', from)
+        .lte('work_date', to)
+        .limit(5000),
+    ]);
 
-    const { data, error: queryError } = await query
-      .order('work_date')
-      .order('time_in')
-      .limit(nextLimit + 1);
-
-    if (queryError) {
-      setError(queryError.message);
+    if (attendance.error) {
+      setError(attendance.error.message);
       setRows([]);
       setHasMore(false);
     } else {
-      const list = (data || []) as any[];
+      const list = (attendance.data || []) as any[];
       setHasMore(list.length > nextLimit);
       setRows(list.slice(0, nextLimit));
       setLimit(nextLimit);
     }
+
+    const keySet = new Set<string>(
+      ((keys.data || []) as { employee_id: string; work_date: string }[]).map(
+        (k) => `${k.employee_id}|${k.work_date}`
+      )
+    );
+    setPresentKeys(keySet);
     setLoading(false);
   };
 
   useEffect(() => {
     db.from('profiles')
-      .select('id,full_name,role')
+      .select('id,full_name,employee_number,username,shift,role,is_active')
+      .eq('role', 'employee')
+      .eq('is_active', true)
       .order('full_name')
       .then(({ data }) => setEmployees((data || []) as Profile[]));
     load();
   }, []);
 
-  const filteredRows = shiftFilter === 'all'
-    ? rows
-    : rows.filter((r) => (r.shift || r.profiles?.shift || 'morning') === shiftFilter);
+  /** Attendance rows matching the shift + status filters. */
+  const attendanceRows = rows.filter((r) => {
+    const shift = r.shift || r.profiles?.shift || 'morning';
+    if (shiftFilter !== 'all' && shift !== shiftFilter) return false;
+    if (statusFilter === 'all' || statusFilter === 'absent') return true;
+    return r.status === statusFilter;
+  });
+
+  /** Working days in the range (Friday is the weekly day off). */
+  const workingDays = (() => {
+    const days: string[] = [];
+    if (!from || !to) return days;
+    const start = new Date(`${from}T00:00:00Z`);
+    const end = new Date(`${to}T00:00:00Z`);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return days;
+    for (let d = start; d <= end && days.length < 366; d.setUTCDate(d.getUTCDate() + 1)) {
+      if (d.getUTCDay() === 5) continue;
+      days.push(d.toISOString().slice(0, 10));
+    }
+    return days;
+  })();
+
+  /** Employees with no attendance row for a working day. */
+  const absenceRows = (() => {
+    if (statusFilter !== 'absent') return [] as { date: string; employee: Profile }[];
+    const out: { date: string; employee: Profile }[] = [];
+    for (const date of workingDays) {
+      for (const employee of employees) {
+        const shift = employee.shift || 'morning';
+        if (shiftFilter !== 'all' && shift !== shiftFilter) continue;
+        if (!presentKeys.has(`${employee.id}|${date}`)) out.push({ date, employee });
+      }
+    }
+    return out;
+  })();
+
+  const displayCount = statusFilter === 'absent' ? absenceRows.length : attendanceRows.length;
 
   const csv = () => {
-    const lines = [
-      ['Date', 'Employee', 'Employee ID', 'Department', 'Shift', 'Time In', 'Status'],
-      ...filteredRows.map((r) => {
-        const shift = r.shift || r.profiles?.shift || 'morning';
-        return [
-          r.work_date,
-          r.profiles?.full_name || '',
-          r.profiles?.employee_number || '',
-          r.profiles?.department || '',
-          shift === 'afternoon' ? 'Afternoon' : 'Morning',
-          timeLocal(r.time_in),
-          r.status,
+    const isAbsent = statusFilter === 'absent';
+    const lines = isAbsent
+      ? [
+          ['Date', 'Employee', 'Employee ID', 'Department', 'Shift', 'Status'],
+          ...absenceRows.map(({ date, employee }) => {
+            const shift = employee.shift || 'morning';
+            return [
+              date,
+              employee.full_name,
+              employee.employee_number,
+              employee.department || '',
+              shift === 'afternoon' ? 'Afternoon' : 'Morning',
+              'Absent',
+            ];
+          }),
+        ]
+      : [
+          ['Date', 'Employee', 'Employee ID', 'Department', 'Shift', 'Time In', 'Status'],
+          ...attendanceRows.map((r) => {
+            const shift = r.shift || r.profiles?.shift || 'morning';
+            return [
+              r.work_date,
+              r.profiles?.full_name || '',
+              r.profiles?.employee_number || '',
+              r.profiles?.department || '',
+              shift === 'afternoon' ? 'Afternoon' : 'Morning',
+              timeLocal(r.time_in),
+              r.status,
+            ];
+          }),
         ];
-      }),
-    ];
     const ws = XLSX.utils.aoa_to_sheet(lines);
     ws['!cols'] = [
       { wch: 14 },
@@ -1332,8 +1444,8 @@ function Reports() {
       { wch: 12 },
     ];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
-    XLSX.writeFile(wb, `attendance_${from}_to_${to}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, isAbsent ? 'Absences' : 'Attendance');
+    XLSX.writeFile(wb, `attendance_${from}_to_${to}${isAbsent ? '_absences' : ''}.xlsx`);
   };
 
   return (
@@ -1344,7 +1456,7 @@ function Reports() {
           <h1>Attendance reports</h1>
           <p className="muted">Filter records and export a formatted Excel workbook.</p>
         </div>
-        <button className="primary" onClick={csv} disabled={!filteredRows.length}>
+        <button className="primary" onClick={csv} disabled={!displayCount}>
           <Download size={17} /> Export Excel
         </button>
       </div>
@@ -1359,10 +1471,10 @@ function Reports() {
             <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
           </label>
           <label>
-            Employee
+            Show
             <select
-              value={employeeId}
-              onChange={(e) => setEmployeeId(e.target.value)}
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as any)}
               style={{
                 border: '1px solid #dce5ee',
                 borderRadius: '8px',
@@ -1372,12 +1484,10 @@ function Reports() {
                 color: '#111827',
               }}
             >
-              <option value="all">All employees</option>
-              {employees.map((emp) => (
-                <option key={emp.id} value={emp.id}>
-                  {emp.full_name} ({emp.username})
-                </option>
-              ))}
+              <option value="all">Present + Late</option>
+              <option value="present">Present only</option>
+              <option value="late">Late only</option>
+              <option value="absent">Absent only</option>
             </select>
           </label>
           <label>
@@ -1410,8 +1520,15 @@ function Reports() {
         )}
         <div className="panel-head">
           <h2>
-            {filteredRows.length}
-            {hasMore ? '+' : ''} attendance records
+            {displayCount}
+            {statusFilter !== 'absent' && hasMore ? '+' : ''}{' '}
+            {statusFilter === 'absent'
+              ? displayCount === 1
+                ? 'absence'
+                : 'absences'
+              : displayCount === 1
+              ? 'attendance record'
+              : 'attendance records'}
           </h2>
           <span className="muted">
             {from} — {to}
@@ -1421,8 +1538,12 @@ function Reports() {
           <p className="muted">Loading…</p>
         ) : (
           <>
-            <AttendanceTable rows={filteredRows} />
-            {hasMore && (
+            {statusFilter === 'absent' ? (
+              <AbsenceTable rows={absenceRows} />
+            ) : (
+              <AttendanceTable rows={attendanceRows} />
+            )}
+            {statusFilter !== 'absent' && hasMore && (
               <button
                 className="secondary"
                 style={{ marginTop: '14px' }}

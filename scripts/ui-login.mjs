@@ -109,6 +109,21 @@ if (path) {
   await sleep(4000);
 }
 
+// Optional: pick a value in the "Show" select (reports status filter).
+if (process.env.SELECT_SHOW) {
+  await evaluate(`(() => {
+    const sel = [...document.querySelectorAll('select')].find(
+      (s) => [...s.options].some((o) => o.textContent === 'Absent only')
+    );
+    if (!sel) return 'no select';
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+    setter.call(sel, ${JSON.stringify(process.env.SELECT_SHOW)});
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    return 'selected';
+  })()`);
+  await sleep(2500);
+}
+
 const url = await evaluate('location.href');
 const text = await evaluate('document.body.innerText');
 const png = await send('Page.captureScreenshot', { format: 'png' });
