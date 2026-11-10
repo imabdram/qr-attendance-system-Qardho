@@ -46,3 +46,6 @@ supabase/.branches/
 
 # Local build / browser-test scratch
 .tmp/
+
+# Local backup logs
+backups/

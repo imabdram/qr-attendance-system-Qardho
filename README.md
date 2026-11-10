@@ -91,6 +91,62 @@ plaintext password ever reaches the database. Older bcrypt hashes cannot be
 verified by Better Auth — use *Reset password* in the Employees screen to migrate
 an account.
 
+## Backups
+
+The database lives on Neon; backups are Neon snapshots (copy-on-write, so they cost
+only the storage of changed pages).
+
+### Automatic (this machine)
+
+`scripts/backup-db.ps1` takes one snapshot per day and keeps 14 days of them:
+
+- Windows scheduled task: **Qardho DB Backup**, daily at **02:00** local time.
+- Snapshots are named `auto-YYYY-MM-DD`; older `auto-*` ones are pruned.
+- Log: `backups/backup.log` (git-ignored).
+- Missed runs (PC off) execute at the next opportunity; battery restrictions are off.
+
+Manage it:
+
+```powershell
+schtasks /Query /TN "Qardho DB Backup"
+schtasks /Run   /TN "Qardho DB Backup"     # run now
+schtasks /Delete /TN "Qardho DB Backup" /F # remove
+powershell -NoProfile -File scripts\backup-db.ps1   # manual run
+```
+
+Neon's own automatic backup schedule is **not enabled** for this project (plan
+limitation); the local task fills that gap. The project still has its short
+point-in-time restore window for "oops, deleted a row" recovery.
+
+### Manual snapshot before risky changes
+
+```bash
+neon snapshots create --branch production --name "before-changes-$(date +%F)"
+neon snapshots list
+```
+
+### Restore
+
+Always restore into a new branch first, verify, then switch over:
+
+```bash
+neon snapshots restore <snapshot-id> --name restore-check
+neon snapshots finalize restore-check   # when the restored branch looks right
+```
+
+### Off-site copy (optional)
+
+For a backup that does not depend on this PC, run the same command from CI:
+
+```bash
+neon snapshots create --branch production --name "auto-$(date -u +%F)"
+```
+
+Create an API key with `neon api-keys create --name github-backup`, store it as the
+`NEON_API_KEY` repository secret, and run the command from a GitHub Actions cron
+job. Snapshots include the `neon_auth` schema, so administrator and employee
+logins are covered as well as attendance.
+
 ## Accounts
 
 - Admins sign in with their real email or with a username (e.g. `admin@attendance-login.example.com`).
