@@ -1,213 +1,151 @@
 # Qardho Attendance Portal
 
-QR-based employee **Time In** for the Qardho branch. A rotating office QR code is
-shown on the admin dashboard; employees scan it from their phones to record
-attendance. Admins manage accounts, monitor today's arrivals, and export
-date-filtered Excel reports.
+QR attendance for the Qardho branch. Employees scan the office QR code with their
+phone to record **Time In**; admins see today's arrivals, manage accounts and
+export Excel reports.
 
-## Stack
+**Live:** https://qr-attendance-system-qardho.vercel.app
 
-- React 19 + TypeScript + Vite (PWA)
-- **Neon Lakebase Postgres** (project `qr-attendance-system-Qardho`, branch `production`)
-- **Neon Auth** (Managed Better Auth) for sign-in, sessions, and JWT issuance
-- **Neon Data API** (PostgREST-compatible) for tables and stored functions, guarded by RLS
-- Supabase JS used **only** as the PostgREST transport for the Data API
+## What it does
+
+- One check-in per employee per day, in **Africa/Mogadishu** time (Friday = day off).
+- On-time or late is decided by two editable thresholds (morning / afternoon shift).
+- Admin dashboard refreshes every 10 seconds.
+- Reports filter by **Present / Late / Absent** and export to `.xlsx`.
+- Installable as a phone app (PWA).
+
+## Sign in
+
+| Who | Username | Password |
+| --- | --- | --- |
+| Admin | `admin` or the full admin email | set by the admin |
+| Employee | their username (e.g. `ahmed01`) | set when the account was created |
+
+Employees type only their username — the app adds `@attendance-login.example.com`.
+Admins with a real email must type the complete address.
+
+## Main screens
+
+- **Dashboard** — present, late, not checked in; change the late times.
+- **Employees** — add, edit, reset password, activate/deactivate, delete.
+- **QR Display** — show or print the code employees scan.
+- **Reports** — date range + status filter, Excel export.
+
+## QR codes
+
+Two modes on the **QR Display** page:
+
+| Mode | Behaviour |
+| --- | --- |
+| **Changed by hand** | Stays the same until you press *Change QR Code*. Confirmation is asked, the old code is revoked. Has **Print QR Poster**. |
+| **Auto every** | Rotates automatically every *x* minutes / hours / days (maximum 30 days). |
+
+Every code expires within **30 days**. Use **Revoke QR Codes** immediately if a code
+leaks. Only signed-in employees can scan.
+
+## Tech stack
+
+- React 19 + TypeScript + Vite (PWA), `lucide-react` icons
+- **Neon Postgres** (branch `production`) with Row Level Security
+- **Neon Auth** (Managed Better Auth) — sessions + JWT
+- **Neon Data API** (PostgREST) — tables and stored functions; `supabase-js` is only the HTTP client
 - `html5-qrcode` scanner, `qrcode.react` display, `xlsx` export
+- Hosted on **Vercel**
 
-## Architecture
-
-```
-Browser (React SPA)
-   │  sign-in / session cookie
-   ├──────────────► Neon Auth  /neondb/auth
-   │                   └─ issues short-lived JWT (GET /token)
-   │  Bearer <JWT>
-   └──────────────► Neon Data API  /neondb/rest/v1
-                       ├─ tables (profiles, attendance, qr_tokens, app_settings)
-                       └─ RPCs (create_qr_token, scan_attendance, admin_*)
-```
-
-Row Level Security still applies: `auth.uid()` comes from the JWT, and every
-admin RPC re-checks `public.is_admin()`.
-
-## Environment
-
-Copy `.env.example` to `.env.local`:
-
-```env
-VITE_NEON_AUTH_URL=https://<endpoint>.neonauth.c-2.eu-west-2.aws.neon.tech/neondb/auth
-VITE_NEON_DATA_API_URL=https://<endpoint>.apirest.c-2.eu-west-2.aws.neon.tech/neondb/rest/v1
-```
-
-Server-side only (migrations/scripts, never bundled):
-
-```env
-DATABASE_URL=postgresql://…            # pooled
-DATABASE_URL_UNPOOLED=postgresql://…   # direct, used by scripts
-```
-
-Both `VITE_` values have production defaults baked into `src/lib/neon.ts`, so a
-Vercel build works even if the variables are not set — but setting them per
-environment is recommended.
-
-## Local development
+## Run locally
 
 ```bash
 npm install
-npm run dev      # http://localhost:5173
-npm run build    # tsc -b && vite build
+npm run dev        # http://localhost:5173
+npm run build      # type-check + production build
 npm run preview
 ```
 
+## Environment (`.env.local`)
+
+```env
+VITE_NEON_AUTH_URL=https://<host>/neondb/auth
+VITE_NEON_DATA_API_URL=https://<host>/neondb/rest/v1
+DATABASE_URL=postgresql://...            # scripts only
+DATABASE_URL_UNPOOLED=postgresql://...   # scripts only
+ADMIN_EMAIL=admin@attendance-login.example.com
+ADMIN_PASSWORD=...                       # used by maintenance scripts
+```
+
+Only the two `VITE_` values reach the browser. Never put `DATABASE_URL` or
+`ADMIN_PASSWORD` in Vercel’s `VITE_` variables.
+
 ## Database
 
-Schema objects live in `db/migrations/` (the historical `supabase/migrations`
-files document the original schema and are no longer applied).
+SQL lives in `db/migrations/` and is applied in order:
 
 ```bash
 node scripts/apply-sql.mjs db/migrations/001_neon_auth_scrypt_rpcs.sql
-neon data-api refresh-schema      # after adding/removing functions
+node scripts/apply-sql.mjs db/migrations/002_admin_email.sql
+node scripts/apply-sql.mjs db/migrations/003_qr_ttl_and_revoke.sql
+node scripts/apply-sql.mjs db/migrations/004_qr_ttl_30_days.sql
+neon data-api refresh-schema        # required after adding/changing functions
 ```
 
-### Stored functions
+Tables: `profiles`, `attendance`, `qr_tokens`, `app_settings` (plus `neon_auth.*`).
+Functions: `create_qr_token`, `revoke_qr_tokens`, `scan_attendance`, `admin_create_user`,
+`admin_update_employee`, `admin_reset_password`, `admin_delete_employee`, `is_admin`.
 
-| Function | Purpose |
-| --- | --- |
-| `create_qr_token(p_duration_seconds)` | Issues a QR token (30 s – 24 h), stores only its SHA-256 hash |
-| `revoke_qr_tokens()` | Admin-only: invalidates every active QR code at once |
-| `scan_attendance(p_token)` | Validates the token and writes a Time In row (Mogadishu date, shift-aware late detection) |
-| `admin_create_user(...)` | Creates `neon_auth.user` + credential account + `public.profiles` row |
-| `admin_update_employee(...)` | Updates name / phone / department / shift |
-| `admin_reset_password(...)` | Replaces the credential hash and drops existing sessions |
-| `admin_delete_employee(...)` | Deletes attendance, profile, account, sessions, and the auth user |
-| `is_admin()` | RLS helper backed by the JWT |
+Passwords use Neon Auth’s **scrypt** hashes; the browser hashes them before the RPC,
+so plaintext never reaches the database.
 
-### Passwords
+## Accounts
 
-Neon Auth (Better Auth) verifies **scrypt** hashes (`<32 hex salt>:<128 hex key>`,
-N=16384, r=16, p=1, dkLen=64). The browser hashes the password
-(`hashPassword()` in `src/lib/neon.ts`) and the RPC stores the hash, so no
-plaintext password ever reaches the database. Older bcrypt hashes cannot be
-verified by Better Auth — use *Reset password* in the Employees screen to migrate
-an account.
+- Create employees from **Employees → Add Employee**.
+- Create or re-password an admin from the command line:
+
+```bash
+node scripts/add-admin.mjs person@example.com 'StrongPassword!' "Their Name"
+```
+
+Running the same command twice resets that admin’s password.
+
+## Deploy (Vercel)
+
+1. Push to GitHub — Vercel rebuilds automatically.
+2. Project settings: framework **Vite**, build `npm run build`, output `dist`.
+3. Add `VITE_NEON_AUTH_URL` and `VITE_NEON_DATA_API_URL` (Production + Preview).
+4. Register the domain with Neon Auth:
+
+```bash
+neon neon-auth domain add https://<project>.vercel.app
+neon neon-auth domain list
+```
+
+`vercel.json` handles SPA routing and stops old builds being cached.
 
 ## Backups
 
-The database lives on Neon; backups are Neon snapshots (copy-on-write, so they cost
-only the storage of changed pages).
-
-### Automatic (this machine)
-
-`scripts/backup-db.ps1` takes one snapshot per day and keeps 14 days of them:
-
-- Windows scheduled task: **Qardho DB Backup**, daily at **02:00** local time.
-- Snapshots are named `auto-YYYY-MM-DD`; older `auto-*` ones are pruned.
-- Log: `backups/backup.log` (git-ignored).
-- Missed runs (PC off) execute at the next opportunity; battery restrictions are off.
-
-Manage it:
-
-```powershell
-schtasks /Query /TN "Qardho DB Backup"
-schtasks /Run   /TN "Qardho DB Backup"     # run now
-schtasks /Delete /TN "Qardho DB Backup" /F # remove
-powershell -NoProfile -File scripts\backup-db.ps1   # manual run
-```
-
-Neon's own automatic backup schedule is **not enabled** for this project (plan
-limitation); the local task fills that gap. The project still has its short
-point-in-time restore window for "oops, deleted a row" recovery.
-
-### Manual snapshot before risky changes
+A snapshot is taken every day at 02:00 by the Windows task **Qardho DB Backup**
+(14 days kept, log in `backups/backup.log`). Manual run and restore:
 
 ```bash
 neon snapshots create --branch production --name "before-changes-$(date +%F)"
 neon snapshots list
-```
-
-### Restore
-
-Always restore into a new branch first, verify, then switch over:
-
-```bash
 neon snapshots restore <snapshot-id> --name restore-check
-neon snapshots finalize restore-check   # when the restored branch looks right
 ```
 
-### Off-site copy (optional)
+Backups include logins (`neon_auth`) as well as attendance.
 
-For a backup that does not depend on this PC, run the same command from CI:
+## Checks
 
 ```bash
-neon snapshots create --branch production --name "auto-$(date -u +%F)"
+# ADMIN_EMAIL / ADMIN_PASSWORD from the shell or .env.local
+node scripts/e2e-neon.mjs       # 17 backend checks against live Neon
 ```
 
-Create an API key with `neon api-keys create --name github-backup`, store it as the
-`NEON_API_KEY` repository secret, and run the command from a GitHub Actions cron
-job. Snapshots include the `neon_auth` schema, so administrator and employee
-logins are covered as well as attendance.
+Other helpers in `scripts/`: `audit-neon.mjs` (schema), `apply-sql.mjs`,
+`add-admin.mjs`, `cleanup-test-employees.mjs`, `backup-db.ps1`, and headless UI
+screenshots (`ui-login.mjs`, `ui-diag.mjs`, `cdp-check.mjs`).
 
-## Accounts
+## More documentation
 
-- Admins sign in with their real email or with a username (e.g. `admin@attendance-login.example.com`).
-- Employees sign in with a **username**; the app appends
-  `@attendance-login.example.com` before calling Neon Auth.
-- New accounts are created from **Employees → Add Employee**: pick *Account type*
-  (Employee or Administrator), and for an administrator enter the **email** they
-  will sign in with.
-- The account list shows both roles; use *Reset password* (key icon) to set a new
-  password for anyone, including another admin.
-- The first admin must exist in the database already.
-
-### Adding an admin from the command line
-
-```bash
-node scripts/add-admin.mjs dhomdesign@gmail.com 'SomeStrongPassword!' "Dhom Design"
-```
-
-Re-running the same command with the same email **changes that admin's password**.
-It signs in as an existing admin using `ADMIN_EMAIL` / `ADMIN_PASSWORD`, which must
-be present in the shell or in the git-ignored `.env.local` (never in code):
-
-```env
-ADMIN_EMAIL=you@example.com
-ADMIN_PASSWORD=…
-```
-
-### QR code lifetime
-
-The QR screen has two modes: **Changed by hand** (the code stays the same until an
-admin presses *Change QR Code*, which asks for confirmation and revokes the old
-code) and **Auto every** (rotates on a flexible schedule in minutes, hours or days).
-
-Every token expires within **30 days** — enough for a stable manual code, but never
-unbounded. Press **Revoke QR Codes** if a code leaks.
-
-## Deployment (Vercel)
-
-1. Push this repository to GitHub.
-2. Import the repo in Vercel (framework preset **Vite**, build `npm run build`,
-   output `dist`).
-3. Add `VITE_NEON_AUTH_URL` and `VITE_NEON_DATA_API_URL` for Production and Preview.
-4. Register the deployment domain as a Neon Auth trusted origin:
-
-   ```bash
-   neon neon-auth domain add https://<project>.vercel.app
-   neon neon-auth domain list
-   ```
-
-5. `vercel.json` rewrites every path to `index.html` so client-side routes work.
-
-Without a registered origin, Neon Auth rejects browser sign-in requests from the
-deployed domain.
-
-## Verification
-
-```bash
-# ADMIN_EMAIL / ADMIN_PASSWORD must be set (shell or .env.local)
-node scripts/e2e-neon.mjs              # auth + RPC + RLS + QR cap/revoke checks
-node scripts/ui-login.mjs admin 'the-password' out.png
-```
-
-`scripts/` also contains local helpers (`audit-neon.mjs`, `apply-sql.mjs`,
-`cdp-check.mjs`, UI drivers). They are development tools, not part of the bundle.
+- **[REBUILD_GUIDE.md](REBUILD_GUIDE.md)** — step-by-step rebuild for another
+  branch/company, including the traps we hit.
+- `db/migrations/` — the database contract.
+- `src/lib/neon.ts` — auth, JWT and PostgREST wiring.
