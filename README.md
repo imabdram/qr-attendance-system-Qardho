@@ -176,10 +176,12 @@ ADMIN_PASSWORD=…
 
 ### QR code lifetime
 
-Every QR code expires within **24 hours** (rotating codes expire within a minute).
-There is no permanent option: a photographed permanent poster would allow check-in
-from anywhere. For a printed poster use the **24-Hour QR** mode and reprint daily,
-or press **Revoke QR Codes** if a code leaks.
+The QR screen has two modes: **Changed by hand** (the code stays the same until an
+admin presses *Change QR Code*, which asks for confirmation and revokes the old
+code) and **Auto every** (rotates on a flexible schedule in minutes, hours or days).
+
+Every token expires within **30 days** — enough for a stable manual code, but never
+unbounded. Press **Revoke QR Codes** if a code leaks.
 
 ## Deployment (Vercel)
 

@@ -73,8 +73,8 @@ try {
   check('new employee can sign in with scrypt password', Boolean(emp.token));
 
   const capped = await admin.db.rpc('create_qr_token', { p_duration_seconds: 31536000 });
-  const cappedHours = (new Date(capped.data?.expires_at).getTime() - Date.now()) / 36e5;
-  check('QR lifetime capped at 24h', cappedHours > 23 && cappedHours <= 24.1, `${cappedHours.toFixed(1)}h`);
+  const cappedDays = (new Date(capped.data?.expires_at).getTime() - Date.now()) / 864e5;
+  check('QR lifetime capped at 30 days', cappedDays > 29.9 && cappedDays <= 30.1, `${cappedDays.toFixed(1)}d`);
 
   const doomed = await admin.db.rpc('create_qr_token', { p_duration_seconds: 45 });
   const revoked = await admin.db.rpc('revoke_qr_tokens');

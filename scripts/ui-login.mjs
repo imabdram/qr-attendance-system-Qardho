@@ -109,6 +109,19 @@ if (path) {
   await sleep(4000);
 }
 
+// Optional: click a button whose text contains CLICK_TEXT (e.g. switch QR mode).
+if (process.env.CLICK_TEXT) {
+  await evaluate(`(() => {
+    const btn = [...document.querySelectorAll('button')].find((b) =>
+      b.textContent.includes(${JSON.stringify(process.env.CLICK_TEXT)})
+    );
+    if (!btn) return 'no button';
+    btn.click();
+    return 'clicked';
+  })()`);
+  await sleep(3000);
+}
+
 // Optional: pick a value in the "Show" select (reports status filter).
 if (process.env.SELECT_SHOW) {
   await evaluate(`(() => {

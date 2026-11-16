@@ -11,6 +11,7 @@
 /* QR Mode Selector & Controls */
 .qr-config-panel{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:20px;max-width:560px;margin:0 auto 20px;box-shadow:0 3px 12px #11182706}
 .qr-mode-selector{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#f1f5f9;padding:5px;border-radius:12px;margin-bottom:16px}
+.qr-mode-selector.two-up{grid-template-columns:repeat(2,1fr)}
 .qr-mode-tab{border:0;background:transparent;padding:10px 8px;border-radius:8px;font-size:12px;font-weight:700;color:#6b7280;display:flex;align-items:center;justify-content:center;gap:6px;transition:all .15s ease}
 .qr-mode-tab:hover{color:#13324d}
 .qr-mode-tab.active{background:#fff;color:#dc2626;box-shadow:0 2px 8px #00000010}

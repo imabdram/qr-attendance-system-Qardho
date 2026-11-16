@@ -311,7 +311,9 @@ These are the non-obvious parts. Break one and you get a spinner or a 401.
 
 9. **QR tokens are hashed at rest.** `create_qr_token` returns the raw token once,
    stores only its SHA-256; `scan_attendance` hashes the scan and compares.
-   Lifetime is clamped to 30 s–24 h; `revoke_qr_tokens()` kills all active codes.
+   Lifetime is clamped to 30 s–30 days; manual ("changed by hand") codes use the full
+   30 days, automatic codes use interval + 25 s. `revoke_qr_tokens()` kills all
+   active codes, and changing a manual code revokes the previous one first.
 
 10. **Old PWA builds haunt you.** A service worker can serve a previous bundle
     indefinitely. `src/main.tsx` reloads once when a new worker takes control, and
@@ -336,7 +338,7 @@ These are the non-obvious parts. Break one and you get a spinner or a 401.
 | Function | Purpose |
 | --- | --- |
 | `is_admin()` | `auth.uid()` has `role='admin'` and `is_active` |
-| `create_qr_token(p_duration_seconds int = 45)` | Admin-only; clamps 30–86 400 s; returns `{token, expires_at}` |
+| `create_qr_token(p_duration_seconds int = 45)` | Admin-only; clamps 30 s–30 days; returns `{token, expires_at}` |
 | `revoke_qr_tokens()` | Admin-only; deletes all unexpired tokens |
 | `scan_attendance(p_token text)` | Employee-only; validates hash + expiry, Friday block, late/on-time, one row per day |
 | `admin_create_user(full_name, employee_number, username, password_hash, role, shift, department, email)` | Creates `neon_auth.user` + credential account + profile |
@@ -390,7 +392,7 @@ a real address.
 | Late thresholds | `app_settings` rows (also editable on the dashboard) |
 | Shifts | `profiles.shift` / `attendance.shift` checks, `admin_update_employee`, the two selects in `Admin.tsx` |
 | Friday day off | `scan_attendance` (`v_weekday = 'Fri'`) |
-| QR rotation | `Admin.tsx` interval buttons (15 s–5 m), token TTL = interval + 25 s |
+| QR rotation | `Admin.tsx` — manual mode (stable code, optional print) or auto mode with minutes/hours/days; manual TTL = 30 days, auto TTL = interval + 25 s |
 
 The timezone is duplicated in the database function. Changing only the frontend
 gives you a dashboard in one timezone and check-ins in another.
